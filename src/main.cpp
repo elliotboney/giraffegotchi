@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <SPI.h>
+#include <LittleFS.h>
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
 #include "pet.h"
@@ -35,7 +36,12 @@ void setup() {
 
   tft.init();
   tft.setRotation(1);            // landscape 320x240
+  tft.setSwapBytes(true);        // RGB565 byte order for pushImage (PNG decode)
   tft.fillScreen(BG_COLOR);
+
+  if (!LittleFS.begin()) {
+    Serial.println("LittleFS mount failed — run 'pio run -t uploadfs'");
+  }
 
   touchSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
   ts.begin(touchSPI);
