@@ -19,7 +19,8 @@ BG = (168, 216, 224)       # == BG_COLOR 0xAEDC after 565 quantization
 BG_TOL = 44                # diff vs bg that counts as foreground (higher = drops soft AA edge to bg)
 SNAP_TOL = 30              # final pass: pixels this close to bg snap to exact bg (kills halo)
 
-EMOTIONS = ["happy", "hungry", "sad", "excited", "sleepy", "sick", "reading"]
+EMOTIONS = ["happy", "hungry", "sad", "excited", "sleepy", "sick", "reading",
+            "thirsty", "bored", "dirty"]
 
 
 def corner_key(im):

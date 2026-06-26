@@ -2,8 +2,11 @@
 #include <LittleFS.h>
 #include <PNGdec.h>
 
-const Rect FEED_BTN = {90, 196, 100, 38};
-const Rect BOOK_BTN = {262, 194, 50, 42};
+const Rect FEED_BTN  = {  4, 198, 60, 38};
+const Rect DRINK_BTN = { 68, 198, 60, 38};
+const Rect PLAY_BTN  = {132, 198, 60, 38};
+const Rect CLEAN_BTN = {196, 198, 60, 38};
+const Rect BOOK_BTN  = {260, 198, 60, 38};
 
 // Image placement aliases (geometry is declared in ui.h so main.cpp can use it).
 static const int IMG_W = GIRAFFE_W, IMG_H = GIRAFFE_H;
@@ -32,6 +35,9 @@ static const char* emotionPath(Emotion emotion) {
     case Emotion::Sleepy:  return "/giraffe_sleepy.png";
     case Emotion::Sick:    return "/giraffe_sick.png";
     case Emotion::Reading: return "/giraffe_reading.png";
+    case Emotion::Thirsty: return "/giraffe_thirsty.png";
+    case Emotion::Bored:   return "/giraffe_bored.png";
+    case Emotion::Dirty:   return "/giraffe_dirty.png";
     case Emotion::Happy:
     default:               return "/giraffe_happy.png";
   }
@@ -80,24 +86,30 @@ bool renderGiraffeToBuffer(uint16_t* dst, Emotion emotion) {
   return ok;
 }
 
-void drawHungerBar(TFT_eSPI& tft, uint8_t hunger) {
-  const int x = 10, y = 10, w = 200, h = 18;
-  tft.drawRect(x - 1, y - 1, w + 2, h + 2, TFT_WHITE);
-  const int fill = map(hunger, 0, 100, 0, w);
-  const uint16_t col = (hunger < Pet::HUNGRY_THRESHOLD) ? TFT_RED : TFT_GREEN;
-  tft.fillRect(x, y, fill, h, col);
-  tft.fillRect(x + fill, y, w - fill, h, TFT_DARKGREY);
+static void drawMeter(TFT_eSPI& tft, int cellX, uint8_t value, uint16_t color, const char* label) {
+  const int y = 8, bx = cellX + 14, bw = 58, bh = 12, by = y + 2;
   tft.setTextColor(TFT_WHITE, BG_COLOR);
   tft.setTextDatum(TL_DATUM);
-  tft.drawString("Hunger", x + w + 8, y + 2, 2);
+  tft.drawString(label, cellX, y, 2);
+  tft.drawRect(bx - 1, by - 1, bw + 2, bh + 2, TFT_WHITE);
+  const int fill = (int)value * bw / 100;
+  tft.fillRect(bx, by, fill, bh, value < Pet::LOW_THRESHOLD ? TFT_RED : color);
+  tft.fillRect(bx + fill, by, bw - fill, bh, TFT_DARKGREY);
 }
 
-void drawFeedButton(TFT_eSPI& tft) {
-  tft.fillRoundRect(FEED_BTN.x, FEED_BTN.y, FEED_BTN.w, FEED_BTN.h, 8, TFT_DARKGREEN);
-  tft.drawRoundRect(FEED_BTN.x, FEED_BTN.y, FEED_BTN.w, FEED_BTN.h, 8, TFT_WHITE);
+void drawMeters(TFT_eSPI& tft, uint8_t hunger, uint8_t thirst, uint8_t fun, uint8_t hygiene) {
+  drawMeter(tft, 2,   hunger,  TFT_GREEN,   "H");
+  drawMeter(tft, 80,  thirst,  TFT_CYAN,    "T");
+  drawMeter(tft, 158, fun,     TFT_YELLOW,  "F");
+  drawMeter(tft, 236, hygiene, TFT_MAGENTA, "C");
+}
+
+static void drawTextBtn(TFT_eSPI& tft, const Rect& b, const char* label, uint16_t bg) {
+  tft.fillRoundRect(b.x, b.y, b.w, b.h, 8, bg);
+  tft.drawRoundRect(b.x, b.y, b.w, b.h, 8, TFT_WHITE);
   tft.setTextColor(TFT_WHITE);
   tft.setTextDatum(MC_DATUM);
-  tft.drawString("FEED", FEED_BTN.x + FEED_BTN.w / 2, FEED_BTN.y + FEED_BTN.h / 2, 4);
+  tft.drawString(label, b.x + b.w / 2, b.y + b.h / 2, 2);
 }
 
 void drawFood(TFT_eSPI& tft, int x, int y, int r) {
@@ -108,26 +120,45 @@ void drawFood(TFT_eSPI& tft, int x, int y, int r) {
   tft.fillTriangle(x + 1, y - r - 2, x + 7, y - r - 5, x + 4, y - r + 1, TFT_GREEN);  // leaf
 }
 
-void drawBookButton(TFT_eSPI& tft) {
-  const Rect& b = BOOK_BTN;
-  tft.fillRoundRect(b.x, b.y, b.w, b.h, 8, TFT_NAVY);
-  tft.drawRoundRect(b.x, b.y, b.w, b.h, 8, TFT_WHITE);
-
+static void drawBookGlyph(TFT_eSPI& tft, const Rect& b) {
   // open-book glyph centered in the button
   const int cx = b.x + b.w / 2;       // spine x
   const int top = b.y + 11;
   const int bot = b.y + 30;
-  const int pw = 17;                   // page half-width
-  // two cream pages meeting at the spine
+  const int pw = 13;                   // page half-width
   tft.fillTriangle(cx, top, cx - pw, top + 3, cx - pw, bot, TFT_SILVER);
   tft.fillTriangle(cx, top, cx - pw, bot, cx, bot, TFT_SILVER);
   tft.fillTriangle(cx, top, cx + pw, top + 3, cx + pw, bot, TFT_SILVER);
   tft.fillTriangle(cx, top, cx + pw, bot, cx, bot, TFT_SILVER);
-  // spine + page text lines
   tft.drawFastVLine(cx, top, bot - top, TFT_DARKGREY);
   for (int i = 0; i < 3; i++) {
     const int ly = top + 6 + i * 5;
     tft.drawFastHLine(cx - pw + 3, ly, pw - 5, TFT_DARKGREY);
     tft.drawFastHLine(cx + 3, ly, pw - 5, TFT_DARKGREY);
+  }
+}
+
+void drawButtons(TFT_eSPI& tft) {
+  drawTextBtn(tft, FEED_BTN,  "FEED",  TFT_DARKGREEN);
+  drawTextBtn(tft, DRINK_BTN, "DRINK", 0x019F);   // blue
+  drawTextBtn(tft, PLAY_BTN,  "PLAY",  0xC300);   // orange
+  drawTextBtn(tft, CLEAN_BTN, "CLEAN", 0x6810);   // purple
+  tft.fillRoundRect(BOOK_BTN.x, BOOK_BTN.y, BOOK_BTN.w, BOOK_BTN.h, 8, TFT_NAVY);
+  tft.drawRoundRect(BOOK_BTN.x, BOOK_BTN.y, BOOK_BTN.w, BOOK_BTN.h, 8, TFT_WHITE);
+  drawBookGlyph(tft, BOOK_BTN);
+}
+
+static void drawPoop(TFT_eSPI& tft, int x, int y) {
+  tft.fillEllipse(x,     y,     11, 5, 0x6B40);   // base coil (brown)
+  tft.fillEllipse(x - 1, y - 6,  8, 4, 0x7BC0);
+  tft.fillEllipse(x,     y - 11, 5, 3, 0x9CC0);
+}
+
+void drawPoops(TFT_eSPI& tft, uint8_t count) {
+  static const int px[Pet::MAX_POOP] = {48, 48, 264, 264};
+  static const int py[Pet::MAX_POOP] = {162, 186, 162, 186};
+  for (int i = 0; i < Pet::MAX_POOP; i++) {
+    if (i < count) drawPoop(tft, px[i], py[i]);
+    else           tft.fillRect(px[i] - 13, py[i] - 15, 26, 22, BG_COLOR);
   }
 }

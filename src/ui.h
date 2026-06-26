@@ -18,15 +18,22 @@ struct Rect {
   }
 };
 
-// Touch hit-zones (screen coords, landscape 320x240).
+// Touch hit-zones (screen coords, landscape 320x240) — a row across the bottom.
 extern const Rect FEED_BTN;
+extern const Rect DRINK_BTN;
+extern const Rect PLAY_BTN;
+extern const Rect CLEAN_BTN;
 extern const Rect BOOK_BTN;
 
 void drawGiraffe(TFT_eSPI& tft, Emotion emotion);
 bool renderGiraffeToBuffer(uint16_t* dst, Emotion emotion);  // decode into GIRAFFE_W*GIRAFFE_H buffer
-void drawHungerBar(TFT_eSPI& tft, uint8_t hunger);
-void drawFeedButton(TFT_eSPI& tft);
-void drawBookButton(TFT_eSPI& tft);
+
+// Top row of four care meters, and the bottom row of five action buttons.
+void drawMeters(TFT_eSPI& tft, uint8_t hunger, uint8_t thirst, uint8_t fun, uint8_t hygiene);
+void drawButtons(TFT_eSPI& tft);
+
+// Draw `count` poop blobs in the lower side background (clears empty slots).
+void drawPoops(TFT_eSPI& tft, uint8_t count);
 
 // Eating-animation food sprite (a little apple) drawn with primitives.
 void drawFood(TFT_eSPI& tft, int x, int y, int r);

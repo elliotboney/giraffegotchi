@@ -26,7 +26,8 @@ Pet pet;
 Emotion lastEmotion;
 bool wasDown = false;
 uint32_t lastTick = 0;
-uint8_t  lastHunger = 255;  // force first bar draw
+uint8_t  lastStats[4] = {255, 255, 255, 255};  // force first meter draw
+uint8_t  lastPoop = 255;                        // force first poop draw
 
 // Eating animation: an apple drops into the giraffe's mouth and is eaten in
 // shrinking bites. We capture the face region once (readRect), then each frame
@@ -50,8 +51,7 @@ EatAnim eat;
 static void redrawScene() {
   const Emotion e = pet.emotion();
   drawGiraffe(tft, e);
-  drawFeedButton(tft);
-  drawBookButton(tft);
+  drawButtons(tft);
   lastEmotion = e;
 }
 
@@ -108,6 +108,55 @@ static void tickEat(uint32_t now) {
   drawFood(tft, MOUTH_X, y, r);
 }
 
+// Sleep animation: "Z" glyphs drift up-and-right from beside the head while
+// sleeping. They live in the background (right of the sprite) so each frame
+// erases cleanly with a background fill.
+static const int      SLEEP_X0 = 214, SLEEP_Y0 = 98;   // start (lower-left, by the head)
+static const int      SLEEP_X1 = 276, SLEEP_Y1 = 46;   // end (upper-right)
+static const uint32_t SLEEP_CYCLE_MS = 2400;
+static const int      SLEEP_ZS = 3;
+
+struct SleepAnim {
+  bool active = false;
+  uint32_t start = 0;
+  int lx[SLEEP_ZS], ly[SLEEP_ZS], ls[SLEEP_ZS];   // last drawn glyph box per slot
+};
+SleepAnim slp;
+
+static void eraseZ(int i) {
+  if (slp.lx[i] > -900)
+    tft.fillRect(slp.lx[i] - 1, slp.ly[i] - 1, 6 * slp.ls[i] + 3, 8 * slp.ls[i] + 3, BG_COLOR);
+  slp.lx[i] = -999;
+}
+
+static void startSleep(uint32_t now) {
+  slp.active = true;
+  slp.start = now;
+  for (int i = 0; i < SLEEP_ZS; i++) slp.lx[i] = -999;
+}
+
+static void stopSleep() {
+  for (int i = 0; i < SLEEP_ZS; i++) eraseZ(i);
+  slp.active = false;
+}
+
+static void tickSleep(uint32_t now) {
+  tft.setTextColor(TFT_NAVY);   // transparent background
+  for (int i = 0; i < SLEEP_ZS; i++) {
+    const uint32_t ph = (now - slp.start + (uint32_t)i * (SLEEP_CYCLE_MS / SLEEP_ZS)) % SLEEP_CYCLE_MS;
+    const float p = (float)ph / SLEEP_CYCLE_MS;
+    const int x = SLEEP_X0 + (int)((SLEEP_X1 - SLEEP_X0) * p);
+    const int y = SLEEP_Y0 + (int)((SLEEP_Y1 - SLEEP_Y0) * p);
+    const int s = 1 + (int)(p * 2.0f);          // grows 1 -> 3 as it rises
+    eraseZ(i);
+    tft.setTextSize(s);
+    tft.setCursor(x, y);
+    tft.print("Z");
+    slp.lx[i] = x; slp.ly[i] = y; slp.ls[i] = s;
+  }
+  tft.setTextSize(1);   // restore so other text (hunger bar, buttons) is normal
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -129,10 +178,12 @@ void setup() {
 
   lastEmotion = pet.emotion();
   drawGiraffe(tft, lastEmotion);
-  drawFeedButton(tft);
-  drawBookButton(tft);
-  drawHungerBar(tft, pet.hunger());
-  lastHunger = pet.hunger();
+  drawButtons(tft);
+  drawMeters(tft, pet.hunger(), pet.thirst(), pet.fun(), pet.hygiene());
+  drawPoops(tft, pet.poopCount());
+  lastStats[0] = pet.hunger(); lastStats[1] = pet.thirst();
+  lastStats[2] = pet.fun();    lastStats[3] = pet.hygiene();
+  lastPoop = pet.poopCount();
   lastTick = millis();
 }
 
@@ -151,8 +202,11 @@ void loop() {
       // the touch axes are swapped — map p.y to sx and p.x to sy instead.
       const int sx = constrain(map(p.x, TS_MINX, TS_MAXX, 0, tft.width()),  0, tft.width()  - 1);
       const int sy = constrain(map(p.y, TS_MINY, TS_MAXY, 0, tft.height()), 0, tft.height() - 1);
-      if (FEED_BTN.contains(sx, sy)) { pet.feed(); startEat(now); }
-      else if (BOOK_BTN.contains(sx, sy)) pet.read();
+      if      (FEED_BTN.contains(sx, sy))  { pet.feed(); startEat(now); }
+      else if (DRINK_BTN.contains(sx, sy)) pet.drink();
+      else if (PLAY_BTN.contains(sx, sy))  pet.play();
+      else if (CLEAN_BTN.contains(sx, sy)) pet.clean();
+      else if (BOOK_BTN.contains(sx, sy))  pet.read();
     }
   }
   wasDown = down;
@@ -165,19 +219,32 @@ void loop() {
     // hunger-driven and time-driven transitions, e.g. excited -> happy).
     const Emotion e = pet.emotion();
     if (e != lastEmotion) {
+      if (slp.active) stopSleep();   // clear Z's before switching sprite
       drawGiraffe(tft, e);
-      drawFeedButton(tft);
-      drawBookButton(tft);
+      drawButtons(tft);
       lastEmotion = e;
+    }
+    // Run the ambient sleep animation while sleepy.
+    if (e == Emotion::Sleepy) {
+      if (!slp.active) startSleep(now);
+      tickSleep(now);
+    } else if (slp.active) {
+      stopSleep();
     }
   }
 
-  // Redraw the hunger bar the instant the value changes (feed or decay) —
-  // no lag, no redundant overdraw.
-  const uint8_t h = pet.hunger();
-  if (h != lastHunger) {
-    drawHungerBar(tft, h);
-    lastHunger = h;
+  // Redraw the meters the instant any stat changes (action or decay).
+  const uint8_t hu = pet.hunger(), th = pet.thirst(), fn = pet.fun(), hy = pet.hygiene();
+  if (hu != lastStats[0] || th != lastStats[1] || fn != lastStats[2] || hy != lastStats[3]) {
+    drawMeters(tft, hu, th, fn, hy);
+    lastStats[0] = hu; lastStats[1] = th; lastStats[2] = fn; lastStats[3] = hy;
+  }
+
+  // Redraw poop when the count changes (spawn or clean).
+  const uint8_t pc = pet.poopCount();
+  if (pc != lastPoop) {
+    drawPoops(tft, pc);
+    lastPoop = pc;
   }
 
   delay(10);
