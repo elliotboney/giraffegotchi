@@ -57,6 +57,40 @@ static void drawTree(TFT_eSPI& tft, int bx, int by) {
   tft.fillRect(bx - 10 + sw, by - 61, 20, 4, 0x4440);
 }
 
+// Clouds + birds drift through the sky and pass BEHIND the giraffe: they are
+// clipped out of the occlusion x-range so they vanish behind the pet.
+static const int OCC_L = 82, OCC_R = 238;
+static int s_cloudX[2] = {-999, -999};
+static int s_birdX[3]  = {-999, -999, -999};
+static const int CLOUD_Y[2] = {50, 72};
+static const int BIRD_Y[3]  = {58, 86, 66};
+
+static void drawCloud(TFT_eSPI& tft, int x, int y) {
+  const int dx[4] = {7, 18, 28, 17}, dy[4] = {4, 3, 4, 7};
+  const int rx[4] = {8, 10, 7, 20},  ry[4] = {4, 5, 4, 2};
+  for (int k = 0; k < 4; k++) {
+    const int ex = x + dx[k];
+    // skip any puff that would reach into the giraffe zone (edge, not centre),
+    // else its bleed past the boundary never gets erased
+    if (ex + rx[k] > OCC_L && ex - rx[k] < OCC_R) continue;
+    tft.fillEllipse(ex, y + dy[k], rx[k], ry[k], 0xF79E);
+  }
+}
+
+static void eraseCloud(TFT_eSPI& tft, int x, int y) {
+  // cloud footprint spans ~x-3..x+38, y-2..y+9 — erase a touch wider
+  const int l0 = x - 4, l1 = min(x + 40, OCC_L);
+  if (l1 > l0) restoreBg(tft, l0, y - 3, l1 - l0, 16);
+  const int r0 = max(x - 4, OCC_R), r1 = x + 40;
+  if (r1 > r0) restoreBg(tft, r0, y - 3, r1 - r0, 16);
+}
+
+static void drawBird(TFT_eSPI& tft, int x, int y, bool up) {
+  const uint16_t c = 0x4208;
+  if (up) { tft.drawLine(x, y + 2, x + 3, y - 1, c); tft.drawLine(x + 3, y - 1, x + 6, y + 2, c); }
+  else    { tft.drawLine(x, y,     x + 3, y + 2, c); tft.drawLine(x + 3, y + 2, x + 6, y,     c); }
+}
+
 static void drawBlade(TFT_eSPI& tft, const Blade& b) {
   // tip bends by the breeze; x-shifted phase makes the blades ripple
   const int dx = (int)(b.amp * sinf((s_phase + b.x * 9) / 360.0f));
@@ -85,6 +119,25 @@ void animateScenery(TFT_eSPI& tft) {
     tft.fillRect(TREE_RX - 25, TREE_BASEY - 62, 50, 19, SKY_COLOR);
     drawTree(tft, TREE_RX, TREE_BASEY);
     lastR = swR;
+  }
+
+  // clouds drift slowly; only redraw when they move a pixel
+  for (int i = 0; i < 2; i++) {
+    const int nx = (int)((s_phase / 70 + i * 190) % 400) - 40;
+    if (nx != s_cloudX[i]) {
+      if (s_cloudX[i] > -60) eraseCloud(tft, s_cloudX[i], CLOUD_Y[i]);
+      s_cloudX[i] = nx;
+      drawCloud(tft, nx, CLOUD_Y[i]);
+    }
+  }
+
+  // birds fly faster and flap; hidden while behind the giraffe
+  for (int i = 0; i < 3; i++) {
+    const int nx = (int)((s_phase / 28 + i * 140) % 380) - 20;
+    const bool up = ((s_phase / 160 + i) & 1);
+    if (s_birdX[i] > -900) restoreBg(tft, s_birdX[i] - 1, BIRD_Y[i] - 3, 10, 8);
+    if (nx + 8 < OCC_L || nx > OCC_R) { drawBird(tft, nx, BIRD_Y[i], up); s_birdX[i] = nx; }
+    else                              { s_birdX[i] = -999; }
   }
 }
 
