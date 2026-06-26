@@ -23,7 +23,7 @@ SPIClass touchSPI(VSPI);
 XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 
 Pet pet;
-Mood lastMood;
+Emotion lastEmotion;
 bool wasDown = false;
 uint32_t lastTick = 0;
 uint8_t  lastHunger = 255;  // force first bar draw
@@ -47,9 +47,10 @@ void setup() {
   ts.begin(touchSPI);
   ts.setRotation(1);
 
-  lastMood = pet.mood();
-  drawGiraffe(tft, lastMood);
+  lastEmotion = pet.emotion();
+  drawGiraffe(tft, lastEmotion);
   drawFeedButton(tft);
+  drawBookButton(tft);
   drawHungerBar(tft, pet.hunger());
   lastHunger = pet.hunger();
   lastTick = millis();
@@ -71,16 +72,19 @@ void loop() {
       const int sx = constrain(map(p.x, TS_MINX, TS_MAXX, 0, tft.width()),  0, tft.width()  - 1);
       const int sy = constrain(map(p.y, TS_MINY, TS_MAXY, 0, tft.height()), 0, tft.height() - 1);
       if (FEED_BTN.contains(sx, sy)) pet.feed();
+      else if (BOOK_BTN.contains(sx, sy)) pet.read();
     }
   }
   wasDown = down;
 
-  // Redraw the giraffe only when the mood actually changes.
-  const Mood m = pet.mood();
-  if (m != lastMood) {
-    drawGiraffe(tft, m);
+  // Redraw the giraffe only when the emotion actually changes (covers both
+  // hunger-driven and time-driven transitions, e.g. excited -> happy).
+  const Emotion e = pet.emotion();
+  if (e != lastEmotion) {
+    drawGiraffe(tft, e);
     drawFeedButton(tft);
-    lastMood = m;
+    drawBookButton(tft);
+    lastEmotion = e;
   }
 
   // Redraw the hunger bar the instant the value changes (feed or decay) —

@@ -13,9 +13,11 @@ struct Rect {
   }
 };
 
-// Feed button hit-zone (screen coords, landscape 320x240).
+// Touch hit-zones (screen coords, landscape 320x240).
 extern const Rect FEED_BTN;
+extern const Rect BOOK_BTN;
 
-void drawGiraffe(TFT_eSPI& tft, Mood mood);
+void drawGiraffe(TFT_eSPI& tft, Emotion emotion);
 void drawHungerBar(TFT_eSPI& tft, uint8_t hunger);
 void drawFeedButton(TFT_eSPI& tft);
+void drawBookButton(TFT_eSPI& tft);

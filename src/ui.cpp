@@ -2,7 +2,8 @@
 #include <LittleFS.h>
 #include <PNGdec.h>
 
-const Rect FEED_BTN = {110, 196, 100, 38};
+const Rect FEED_BTN = {90, 196, 100, 38};
+const Rect BOOK_BTN = {262, 194, 50, 42};
 
 // Giraffe PNG placement (image is 150x160, centered in the band between the
 // top hunger bar and the bottom feed button).
@@ -22,9 +23,18 @@ static int pngDraw(PNGDRAW* pDraw) {
   return 1;  // continue decoding
 }
 
-void drawGiraffe(TFT_eSPI& tft, Mood mood) {
-  const char* path = (mood == Mood::Hungry) ? "/giraffe_hungry.png"
-                                            : "/giraffe_happy.png";
+void drawGiraffe(TFT_eSPI& tft, Emotion emotion) {
+  const char* path;
+  switch (emotion) {
+    case Emotion::Hungry:  path = "/giraffe_hungry.png";  break;
+    case Emotion::Sad:     path = "/giraffe_sad.png";     break;
+    case Emotion::Excited: path = "/giraffe_excited.png"; break;
+    case Emotion::Sleepy:  path = "/giraffe_sleepy.png";  break;
+    case Emotion::Sick:    path = "/giraffe_sick.png";    break;
+    case Emotion::Reading: path = "/giraffe_reading.png"; break;
+    case Emotion::Happy:
+    default:               path = "/giraffe_happy.png";   break;
+  }
 
   File f = LittleFS.open(path, "r");
   if (f) {
@@ -69,4 +79,28 @@ void drawFeedButton(TFT_eSPI& tft) {
   tft.setTextColor(TFT_WHITE);
   tft.setTextDatum(MC_DATUM);
   tft.drawString("FEED", FEED_BTN.x + FEED_BTN.w / 2, FEED_BTN.y + FEED_BTN.h / 2, 4);
+}
+
+void drawBookButton(TFT_eSPI& tft) {
+  const Rect& b = BOOK_BTN;
+  tft.fillRoundRect(b.x, b.y, b.w, b.h, 8, TFT_NAVY);
+  tft.drawRoundRect(b.x, b.y, b.w, b.h, 8, TFT_WHITE);
+
+  // open-book glyph centered in the button
+  const int cx = b.x + b.w / 2;       // spine x
+  const int top = b.y + 11;
+  const int bot = b.y + 30;
+  const int pw = 17;                   // page half-width
+  // two cream pages meeting at the spine
+  tft.fillTriangle(cx, top, cx - pw, top + 3, cx - pw, bot, TFT_SILVER);
+  tft.fillTriangle(cx, top, cx - pw, bot, cx, bot, TFT_SILVER);
+  tft.fillTriangle(cx, top, cx + pw, top + 3, cx + pw, bot, TFT_SILVER);
+  tft.fillTriangle(cx, top, cx + pw, bot, cx, bot, TFT_SILVER);
+  // spine + page text lines
+  tft.drawFastVLine(cx, top, bot - top, TFT_DARKGREY);
+  for (int i = 0; i < 3; i++) {
+    const int ly = top + 6 + i * 5;
+    tft.drawFastHLine(cx - pw + 3, ly, pw - 5, TFT_DARKGREY);
+    tft.drawFastHLine(cx + 3, ly, pw - 5, TFT_DARKGREY);
+  }
 }
