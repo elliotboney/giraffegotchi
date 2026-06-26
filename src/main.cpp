@@ -263,6 +263,7 @@ void loop() {
 
   pet.update(now - lastTick);
   lastTick = now;
+  uiSetPhase(now);   // advance the breeze for the grass sway
 
   // Edge-triggered feed: one feed per press, not while held.
   const bool down = ts.touched();
@@ -321,6 +322,8 @@ void loop() {
     drawPoops(tft, pc);
     lastPoop = pc;
   }
+
+  animateScenery(tft);   // gentle breeze sway (grass + trees)
 
   delay(10);
 }

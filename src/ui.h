@@ -33,6 +33,8 @@ extern const Rect BOOK_BTN;
 // Savanna scene: full draw, and a clipped restore used by animations to erase.
 void drawScene(TFT_eSPI& tft);
 void restoreBg(TFT_eSPI& tft, int x, int y, int w, int h);
+void uiSetPhase(uint32_t now);      // set the breeze phase before drawing
+void animateScenery(TFT_eSPI& tft); // redraw swaying grass + trees (call each frame)
 
 void drawGiraffe(TFT_eSPI& tft, Emotion emotion);
 bool renderGiraffeToBuffer(uint16_t* dst, Emotion emotion);  // decode into GIRAFFE_W*GIRAFFE_H buffer

@@ -1,6 +1,7 @@
 #include "ui.h"
 #include <LittleFS.h>
 #include <PNGdec.h>
+#include <math.h>
 
 const Rect FEED_BTN  = {  4, 198, 60, 38};
 const Rect DRINK_BTN = { 68, 198, 60, 38};
@@ -11,9 +12,27 @@ const Rect BOOK_BTN  = {260, 198, 60, 38};
 // --- savanna scene ---
 static const int SUN_X = 288, SUN_Y = 52, SUN_R = 16;
 static const int TREE_LX = 22, TREE_RX = 298, TREE_BASEY = 172;
-static const int GRASS_X[] = {12, 40, 66, 256, 282, 308};
-static const int GRASS_N = 6;
-static const int GRASS_Y = 193;
+
+// Layered grass: back row sits near the horizon (small, dark, gentle sway),
+// front row near the buttons (tall, bright, more sway) — gives depth. All x
+// positions stay clear of the poop slots (left ~x48, right ~x264).
+struct Blade { int16_t x, y, h, amp; uint16_t c; };
+static const Blade GRASS[] = {
+  // back row (short, dark, gentle) — scattered x, jittered height/y
+  {  7,172,5,1,0x2A40}, { 22,171,4,1,0x2A40}, { 31,174,5,2,0x2A40},
+  { 64,172,5,1,0x2A40}, { 76,173,4,1,0x2A40},
+  {243,172,5,1,0x2A40}, {283,173,4,1,0x2A40}, {294,171,5,2,0x2A40}, {308,172,5,1,0x2A40},
+  // mid row (medium)
+  {  9,183,8,2,0x3B80}, { 27,182,7,2,0x3B80}, { 70,184,8,2,0x3B80}, { 79,182,7,2,0x3B80},
+  {240,183,8,2,0x3B80}, {287,184,8,2,0x3B80}, {311,182,7,2,0x3B80},
+  // front row (tall, bright, most sway)
+  { 12,196,11,4,0x4DA0}, { 30,194,10,4,0x4DA0}, { 73,196,12,4,0x4DA0},
+  {245,195,11,4,0x4DA0}, {289,196,11,4,0x4DA0}, {313,194,10,4,0x4DA0},
+};
+static const int GRASS_N = sizeof(GRASS) / sizeof(GRASS[0]);
+
+static uint32_t s_phase = 0;                 // breeze phase (ms); set each frame by main
+void uiSetPhase(uint32_t now) { s_phase = now; }
 
 static bool overlap(int ax, int ay, int aw, int ah, int bx, int by, int bw, int bh) {
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
@@ -24,28 +43,61 @@ static void drawSun(TFT_eSPI& tft) {
   tft.fillCircle(SUN_X - 4, SUN_Y - 4, SUN_R / 2, 0xFF30); // highlight
 }
 
-static void drawTree(TFT_eSPI& tft, int bx, int by) {
-  tft.fillRect(bx - 2, by - 42, 4, 42, 0x6A40);            // trunk
-  tft.drawLine(bx, by - 40, bx - 9, by - 48, 0x6A40);      // branches
-  tft.drawLine(bx, by - 40, bx + 9, by - 48, 0x6A40);
-  tft.fillRect(bx - 22, by - 54, 44, 9, 0x33A0);           // flat-top canopy
-  tft.fillRect(bx - 17, by - 58, 34, 6, 0x3BC0);
-  tft.fillRect(bx - 10, by - 61, 20, 4, 0x4440);
+static int treeSway(int bx) {
+  return (int)(2.0f * sinf((s_phase + bx * 40) / 900.0f));   // slow canopy sway, -2..2
 }
 
-static void drawGrass(TFT_eSPI& tft, int x, int y) {
-  tft.drawLine(x, y, x - 3, y - 9, 0x4BC0);
-  tft.drawLine(x, y, x,     y - 11, 0x5C40);
-  tft.drawLine(x, y, x + 3, y - 9, 0x4BC0);
+static void drawTree(TFT_eSPI& tft, int bx, int by) {
+  const int sw = treeSway(bx);
+  tft.fillRect(bx - 2, by - 42, 4, 42, 0x6A40);                 // trunk (still)
+  tft.drawLine(bx, by - 40, bx - 9 + sw, by - 48, 0x6A40);      // branches follow canopy
+  tft.drawLine(bx, by - 40, bx + 9 + sw, by - 48, 0x6A40);
+  tft.fillRect(bx - 22 + sw, by - 54, 44, 9, 0x33A0);           // flat-top canopy
+  tft.fillRect(bx - 17 + sw, by - 58, 34, 6, 0x3BC0);
+  tft.fillRect(bx - 10 + sw, by - 61, 20, 4, 0x4440);
+}
+
+static void drawBlade(TFT_eSPI& tft, const Blade& b) {
+  // tip bends by the breeze; x-shifted phase makes the blades ripple
+  const int dx = (int)(b.amp * sinf((s_phase + b.x * 9) / 360.0f));
+  tft.drawLine(b.x, b.y, b.x - 2 + dx, b.y - b.h + 2, b.c);
+  tft.drawLine(b.x, b.y, b.x     + dx, b.y - b.h,     b.c);
+  tft.drawLine(b.x, b.y, b.x + 2 + dx, b.y - b.h + 2, b.c);
+}
+
+// Re-draw the swaying scenery at the current phase (called each frame). Grass
+// blades are thin lines so they redraw every frame; the trees only redraw when
+// their (integer) sway changes, otherwise the big canopy fill flickers.
+void animateScenery(TFT_eSPI& tft) {
+  for (int i = 0; i < GRASS_N; i++) {
+    const Blade& b = GRASS[i];
+    tft.fillRect(b.x - (b.amp + 3), b.y - b.h - 1, 2 * (b.amp + 3), b.h + 2, GROUND_COLOR);
+    drawBlade(tft, b);
+  }
+  static int lastL = 99, lastR = 99;
+  const int swL = treeSway(TREE_LX), swR = treeSway(TREE_RX);
+  if (swL != lastL) {
+    tft.fillRect(TREE_LX - 25, TREE_BASEY - 62, 50, 19, SKY_COLOR);
+    drawTree(tft, TREE_LX, TREE_BASEY);
+    lastL = swL;
+  }
+  if (swR != lastR) {
+    tft.fillRect(TREE_RX - 25, TREE_BASEY - 62, 50, 19, SKY_COLOR);
+    drawTree(tft, TREE_RX, TREE_BASEY);
+    lastR = swR;
+  }
 }
 
 // Redraw scene props whose bounding box intersects the given rect.
 static void drawProps(TFT_eSPI& tft, int x, int y, int w, int h) {
   if (overlap(x, y, w, h, SUN_X - SUN_R, SUN_Y - SUN_R, 2 * SUN_R, 2 * SUN_R)) drawSun(tft);
-  if (overlap(x, y, w, h, TREE_LX - 22, TREE_BASEY - 61, 44, 61)) drawTree(tft, TREE_LX, TREE_BASEY);
-  if (overlap(x, y, w, h, TREE_RX - 22, TREE_BASEY - 61, 44, 61)) drawTree(tft, TREE_RX, TREE_BASEY);
-  for (int i = 0; i < GRASS_N; i++)
-    if (overlap(x, y, w, h, GRASS_X[i] - 4, GRASS_Y - 12, 8, 13)) drawGrass(tft, GRASS_X[i], GRASS_Y);
+  if (overlap(x, y, w, h, TREE_LX - 25, TREE_BASEY - 62, 50, 62)) drawTree(tft, TREE_LX, TREE_BASEY);
+  if (overlap(x, y, w, h, TREE_RX - 25, TREE_BASEY - 62, 50, 62)) drawTree(tft, TREE_RX, TREE_BASEY);
+  for (int i = 0; i < GRASS_N; i++) {
+    const Blade& b = GRASS[i];
+    if (overlap(x, y, w, h, b.x - (b.amp + 3), b.y - b.h - 1, 2 * (b.amp + 3), b.h + 2))
+      drawBlade(tft, b);
+  }
 }
 
 void drawScene(TFT_eSPI& tft) {

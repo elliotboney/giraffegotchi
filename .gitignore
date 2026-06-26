@@ -1,2 +1,5 @@
 # PlatformIO build artifacts
 .pio/
+
+# Local reference art, not for version control
+docs/other_giraffes/
