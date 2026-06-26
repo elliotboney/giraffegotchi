@@ -133,6 +133,5 @@ This needs more than transparent art — it's a rendering rework. Plan:
 ---
 
 ## 8. Loose ends
-- `img/sleepy.png` is modified but not re-converted (run `prep_sprite.py` if the new source is intended, then `uploadfs`).
 - `docs/other_giraffes/` holds local reference art and is **gitignored** (kept out of history on purpose).
 </content>
