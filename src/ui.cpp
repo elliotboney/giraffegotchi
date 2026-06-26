@@ -5,60 +5,79 @@
 const Rect FEED_BTN = {90, 196, 100, 38};
 const Rect BOOK_BTN = {262, 194, 50, 42};
 
-// Giraffe PNG placement (image is 150x160, centered in the band between the
-// top hunger bar and the bottom feed button).
-static const int IMG_W = 150, IMG_H = 160;
-static const int IMG_X = (320 - IMG_W) / 2;  // 85
-static const int IMG_Y = 34;                 // y 34..194
+// Image placement aliases (geometry is declared in ui.h so main.cpp can use it).
+static const int IMG_W = GIRAFFE_W, IMG_H = GIRAFFE_H;
+static const int IMG_X = GIRAFFE_X, IMG_Y = GIRAFFE_Y;
 
-// PNGdec uses a C-style draw callback that can't capture, so the target and
-// offset are file-static.
+// PNGdec uses a C-style draw callback that can't capture, so targets are
+// file-static. If g_buf is set, decode writes into that IMG_W*IMG_H buffer;
+// otherwise it pushes straight to g_tft at the on-screen offset.
 static PNG png;
 static TFT_eSPI* g_tft = nullptr;
+static uint16_t* g_buf = nullptr;
 
 static int pngDraw(PNGDRAW* pDraw) {
   uint16_t line[IMG_W];
   png.getLineAsRGB565(pDraw, line, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
-  g_tft->pushImage(IMG_X, IMG_Y + pDraw->y, pDraw->iWidth, 1, line);
+  if (g_buf) memcpy(&g_buf[pDraw->y * IMG_W], line, pDraw->iWidth * sizeof(uint16_t));
+  else       g_tft->pushImage(IMG_X, IMG_Y + pDraw->y, pDraw->iWidth, 1, line);
   return 1;  // continue decoding
 }
 
-void drawGiraffe(TFT_eSPI& tft, Emotion emotion) {
-  const char* path;
+static const char* emotionPath(Emotion emotion) {
   switch (emotion) {
-    case Emotion::Hungry:  path = "/giraffe_hungry.png";  break;
-    case Emotion::Sad:     path = "/giraffe_sad.png";     break;
-    case Emotion::Excited: path = "/giraffe_excited.png"; break;
-    case Emotion::Sleepy:  path = "/giraffe_sleepy.png";  break;
-    case Emotion::Sick:    path = "/giraffe_sick.png";    break;
-    case Emotion::Reading: path = "/giraffe_reading.png"; break;
+    case Emotion::Hungry:  return "/giraffe_hungry.png";
+    case Emotion::Sad:     return "/giraffe_sad.png";
+    case Emotion::Excited: return "/giraffe_excited.png";
+    case Emotion::Sleepy:  return "/giraffe_sleepy.png";
+    case Emotion::Sick:    return "/giraffe_sick.png";
+    case Emotion::Reading: return "/giraffe_reading.png";
     case Emotion::Happy:
-    default:               path = "/giraffe_happy.png";   break;
+    default:               return "/giraffe_happy.png";
   }
+}
 
-  File f = LittleFS.open(path, "r");
-  if (f) {
-    const size_t sz = f.size();
-    uint8_t* buf = (uint8_t*)malloc(sz);
-    if (buf) {
-      f.read(buf, sz);
-      f.close();
-      if (png.openRAM(buf, sz, pngDraw) == PNG_SUCCESS) {
-        g_tft = &tft;
-        png.decode(nullptr, 0);
-        png.close();
-      }
-      free(buf);
-      return;
+// Decode the emotion's PNG to the currently-selected target (g_tft or g_buf).
+static bool decodeGiraffe(Emotion emotion) {
+  File f = LittleFS.open(emotionPath(emotion), "r");
+  if (!f) return false;
+  const size_t sz = f.size();
+  uint8_t* buf = (uint8_t*)malloc(sz);
+  bool ok = false;
+  if (buf) {
+    f.read(buf, sz);
+    f.close();
+    if (png.openRAM(buf, sz, pngDraw) == PNG_SUCCESS) {
+      png.decode(nullptr, 0);
+      png.close();
+      ok = true;
     }
+    free(buf);
+  } else {
     f.close();
   }
+  return ok;
+}
+
+void drawGiraffe(TFT_eSPI& tft, Emotion emotion) {
+  g_buf = nullptr;
+  g_tft = &tft;
+  if (decodeGiraffe(emotion)) return;
 
   // Fallback if the asset is missing/unreadable — visible, not a blank screen.
   tft.fillRect(IMG_X, IMG_Y, IMG_W, IMG_H, BG_COLOR);
   tft.setTextColor(TFT_RED, BG_COLOR);
   tft.setTextDatum(MC_DATUM);
   tft.drawString("giraffe png missing", IMG_X + IMG_W / 2, IMG_Y + IMG_H / 2, 2);
+}
+
+// Decode the emotion into a caller-provided IMG_W*IMG_H buffer (same pixel
+// data as the on-screen draw). Returns false if the asset can't be read.
+bool renderGiraffeToBuffer(uint16_t* dst, Emotion emotion) {
+  g_buf = dst;
+  const bool ok = decodeGiraffe(emotion);
+  g_buf = nullptr;
+  return ok;
 }
 
 void drawHungerBar(TFT_eSPI& tft, uint8_t hunger) {
@@ -79,6 +98,14 @@ void drawFeedButton(TFT_eSPI& tft) {
   tft.setTextColor(TFT_WHITE);
   tft.setTextDatum(MC_DATUM);
   tft.drawString("FEED", FEED_BTN.x + FEED_BTN.w / 2, FEED_BTN.y + FEED_BTN.h / 2, 4);
+}
+
+void drawFood(TFT_eSPI& tft, int x, int y, int r) {
+  if (r <= 0) return;
+  tft.fillCircle(x, y, r, TFT_RED);
+  tft.fillCircle(x - r / 3, y - r / 3, r / 4 + 1, 0xFBCC);            // shine
+  tft.drawFastVLine(x, y - r - 3, 4, 0x6300);                        // stem
+  tft.fillTriangle(x + 1, y - r - 2, x + 7, y - r - 5, x + 4, y - r + 1, TFT_GREEN);  // leaf
 }
 
 void drawBookButton(TFT_eSPI& tft) {
