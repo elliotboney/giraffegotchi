@@ -43,7 +43,8 @@ static const uint32_t EAT_BITE_MS  = 200;
 static const int      EAT_BITES    = 3;
 static const uint32_t EAT_TOTAL    = EAT_DROP_MS + EAT_BITE_MS * EAT_BITES;
 
-struct EatAnim { bool active = false; uint32_t start = 0; uint16_t* bg = nullptr; };
+enum ConsumeKind { CONSUME_APPLE, CONSUME_WATER };
+struct EatAnim { bool active = false; uint32_t start = 0; uint16_t* bg = nullptr; int kind = CONSUME_APPLE; };
 EatAnim eat;
 
 // Repaint the giraffe at its current emotion plus the buttons (used to seed
@@ -55,7 +56,8 @@ static void redrawScene() {
   lastEmotion = e;
 }
 
-static void startEat(uint32_t now) {
+static void startEat(uint32_t now, int kind) {
+  eat.kind = kind;
   redrawScene();             // show the eating (excited) face first
 
   // Capture the clean face box by decoding the giraffe into a RAM buffer
@@ -90,22 +92,27 @@ static void tickEat(uint32_t now) {
     return;
   }
 
-  // restore the clean face (erases the previous apple under it)
+  // restore the clean face (erases the previous item under it)
   if (eat.bg) tft.pushImage(CAP_X, CAP_Y, CAP_W, CAP_H, eat.bg);
   else        drawGiraffe(tft, Emotion::Excited);  // fallback if capture failed
 
-  int y, r;
-  if (t < EAT_DROP_MS) {     // drop into the mouth
+  const bool dropping = t < EAT_DROP_MS;
+  int y = MOUTH_Y;
+  if (dropping) {            // drop into the mouth
     const float p = (float)t / EAT_DROP_MS;
     y = DROP_Y0 + (int)((MOUTH_Y - DROP_Y0) * p);
-    r = FOOD_R;
-  } else {                   // bite down in steps
-    y = MOUTH_Y;
-    const int bite = (int)((t - EAT_DROP_MS) / EAT_BITE_MS);
-    r = FOOD_R - bite * (FOOD_R / EAT_BITES + 1);
-    if (r < 2) r = 2;
   }
-  drawFood(tft, MOUTH_X, y, r);
+  const int step = dropping ? -1 : (int)((t - EAT_DROP_MS) / EAT_BITE_MS);  // 0..EAT_BITES-1
+
+  if (eat.kind == CONSUME_WATER) {   // glass drains in gulps
+    int fill = dropping ? 100 : 100 - (step + 1) * 100 / EAT_BITES;
+    if (fill < 0) fill = 0;
+    drawDrink(tft, MOUTH_X, y, fill);
+  } else {                           // apple shrinks in bites
+    int r = dropping ? FOOD_R : FOOD_R - step * (FOOD_R / EAT_BITES + 1);
+    if (r < 2) r = 2;
+    drawFood(tft, MOUTH_X, y, r);
+  }
 }
 
 // Sleep animation: "Z" glyphs drift up-and-right from beside the head while
@@ -125,7 +132,7 @@ SleepAnim slp;
 
 static void eraseZ(int i) {
   if (slp.lx[i] > -900)
-    tft.fillRect(slp.lx[i] - 1, slp.ly[i] - 1, 6 * slp.ls[i] + 3, 8 * slp.ls[i] + 3, BG_COLOR);
+    restoreBg(tft, slp.lx[i] - 1, slp.ly[i] - 1, 6 * slp.ls[i] + 3, 8 * slp.ls[i] + 3);
   slp.lx[i] = -999;
 }
 
@@ -154,7 +161,71 @@ static void tickSleep(uint32_t now) {
     tft.print("Z");
     slp.lx[i] = x; slp.ly[i] = y; slp.ls[i] = s;
   }
-  tft.setTextSize(1);   // restore so other text (hunger bar, buttons) is normal
+  tft.setTextSize(1);   // restore so other text (meters, buttons) is normal
+}
+
+// Play animation: a ball bounces a few times in the left background lane
+// (clear of the giraffe, meters and poop, so it erases with a plain fill).
+static const int      BALL_X       = 42;
+static const int      BALL_GROUND  = 138;
+static const int      BALL_R       = 9;
+static const uint32_t PLAY_MS      = 1400;
+static const int      PLAY_BOUNCES = 3;
+
+struct PlayAnim { bool active = false; uint32_t start = 0; int ly = -999; };
+PlayAnim play_;
+
+static void erasePlay() {
+  if (play_.ly > -900)
+    restoreBg(tft, BALL_X - BALL_R - 1, play_.ly - BALL_R - 1, 2 * BALL_R + 2, 2 * BALL_R + 2);
+  play_.ly = -999;
+}
+
+static void startPlay(uint32_t now) {
+  redrawScene();
+  play_.active = true; play_.start = now; play_.ly = -999;
+}
+
+static void tickPlay(uint32_t now) {
+  const uint32_t t = now - play_.start;
+  if (t >= PLAY_MS) { erasePlay(); play_.active = false; return; }
+  const float prog = (float)t / PLAY_MS;
+  const uint32_t bounceMs = PLAY_MS / PLAY_BOUNCES;
+  const float bp = (float)(t % bounceMs) / bounceMs;                 // 0..1 within a bounce
+  const int amp = (int)(82.0f * (1.0f - prog * 0.55f));              // decaying height
+  const int y = BALL_GROUND - (int)(amp * 4.0f * bp * (1.0f - bp));  // parabola arc
+  erasePlay();
+  drawBall(tft, BALL_X, y, BALL_R);
+  play_.ly = y;
+}
+
+// Clean animation: sparkles twinkle over each poop slot as it is swept away.
+static const int POOP_PX[Pet::MAX_POOP] = {48, 48, 264, 264};
+static const int POOP_PY[Pet::MAX_POOP] = {162, 186, 162, 186};
+static const uint32_t CLEAN_MS = 600;
+
+struct CleanAnim { bool active = false; uint32_t start = 0; uint8_t n = 0; };
+CleanAnim cln;
+
+static void startClean(uint32_t now, uint8_t n) {
+  redrawScene();
+  cln.active = true; cln.start = now; cln.n = n;
+}
+
+static void tickClean(uint32_t now) {
+  const uint32_t t = now - cln.start;
+  if (t >= CLEAN_MS) {
+    for (int i = 0; i < cln.n; i++)
+      restoreBg(tft, POOP_PX[i] - 14, POOP_PY[i] - 16, 28, 26);
+    cln.active = false;
+    return;
+  }
+  const int s = 10 - (int)(20.0f * ((float)t / CLEAN_MS < 0.5f
+                  ? 0.5f - (float)t / CLEAN_MS : (float)t / CLEAN_MS - 0.5f));  // 0..10..0
+  for (int i = 0; i < cln.n; i++) {
+    restoreBg(tft, POOP_PX[i] - 14, POOP_PY[i] - 16, 28, 26);
+    drawSparkle(tft, POOP_PX[i], POOP_PY[i] - 4, s, TFT_WHITE);
+  }
 }
 
 void setup() {
@@ -166,7 +237,7 @@ void setup() {
   tft.init();
   tft.setRotation(1);            // landscape 320x240
   tft.setSwapBytes(true);        // RGB565 byte order for pushImage (PNG decode)
-  tft.fillScreen(BG_COLOR);
+  drawScene(tft);
 
   if (!LittleFS.begin()) {
     Serial.println("LittleFS mount failed — run 'pio run -t uploadfs'");
@@ -202,10 +273,10 @@ void loop() {
       // the touch axes are swapped — map p.y to sx and p.x to sy instead.
       const int sx = constrain(map(p.x, TS_MINX, TS_MAXX, 0, tft.width()),  0, tft.width()  - 1);
       const int sy = constrain(map(p.y, TS_MINY, TS_MAXY, 0, tft.height()), 0, tft.height() - 1);
-      if      (FEED_BTN.contains(sx, sy))  { pet.feed(); startEat(now); }
-      else if (DRINK_BTN.contains(sx, sy)) pet.drink();
-      else if (PLAY_BTN.contains(sx, sy))  pet.play();
-      else if (CLEAN_BTN.contains(sx, sy)) pet.clean();
+      if      (FEED_BTN.contains(sx, sy))  { pet.feed();  startEat(now, CONSUME_APPLE); }
+      else if (DRINK_BTN.contains(sx, sy)) { pet.drink(); startEat(now, CONSUME_WATER); }
+      else if (PLAY_BTN.contains(sx, sy))  { pet.play();  startPlay(now); }
+      else if (CLEAN_BTN.contains(sx, sy)) { const uint8_t n = pet.poopCount(); pet.clean(); startClean(now, n); }
       else if (BOOK_BTN.contains(sx, sy))  pet.read();
     }
   }
@@ -231,6 +302,10 @@ void loop() {
     } else if (slp.active) {
       stopSleep();
     }
+
+    // One-shot action animations (background-safe; run alongside the sprite).
+    if (play_.active) tickPlay(now);
+    if (cln.active)   tickClean(now);
   }
 
   // Redraw the meters the instant any stat changes (action or decay).

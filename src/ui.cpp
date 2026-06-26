@@ -8,6 +8,64 @@ const Rect PLAY_BTN  = {132, 198, 60, 38};
 const Rect CLEAN_BTN = {196, 198, 60, 38};
 const Rect BOOK_BTN  = {260, 198, 60, 38};
 
+// --- savanna scene ---
+static const int SUN_X = 288, SUN_Y = 52, SUN_R = 16;
+static const int TREE_LX = 22, TREE_RX = 298, TREE_BASEY = 172;
+static const int GRASS_X[] = {12, 40, 66, 256, 282, 308};
+static const int GRASS_N = 6;
+static const int GRASS_Y = 193;
+
+static bool overlap(int ax, int ay, int aw, int ah, int bx, int by, int bw, int bh) {
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+static void drawSun(TFT_eSPI& tft) {
+  tft.fillCircle(SUN_X, SUN_Y, SUN_R, 0xFEC0);             // warm yellow
+  tft.fillCircle(SUN_X - 4, SUN_Y - 4, SUN_R / 2, 0xFF30); // highlight
+}
+
+static void drawTree(TFT_eSPI& tft, int bx, int by) {
+  tft.fillRect(bx - 2, by - 42, 4, 42, 0x6A40);            // trunk
+  tft.drawLine(bx, by - 40, bx - 9, by - 48, 0x6A40);      // branches
+  tft.drawLine(bx, by - 40, bx + 9, by - 48, 0x6A40);
+  tft.fillRect(bx - 22, by - 54, 44, 9, 0x33A0);           // flat-top canopy
+  tft.fillRect(bx - 17, by - 58, 34, 6, 0x3BC0);
+  tft.fillRect(bx - 10, by - 61, 20, 4, 0x4440);
+}
+
+static void drawGrass(TFT_eSPI& tft, int x, int y) {
+  tft.drawLine(x, y, x - 3, y - 9, 0x4BC0);
+  tft.drawLine(x, y, x,     y - 11, 0x5C40);
+  tft.drawLine(x, y, x + 3, y - 9, 0x4BC0);
+}
+
+// Redraw scene props whose bounding box intersects the given rect.
+static void drawProps(TFT_eSPI& tft, int x, int y, int w, int h) {
+  if (overlap(x, y, w, h, SUN_X - SUN_R, SUN_Y - SUN_R, 2 * SUN_R, 2 * SUN_R)) drawSun(tft);
+  if (overlap(x, y, w, h, TREE_LX - 22, TREE_BASEY - 61, 44, 61)) drawTree(tft, TREE_LX, TREE_BASEY);
+  if (overlap(x, y, w, h, TREE_RX - 22, TREE_BASEY - 61, 44, 61)) drawTree(tft, TREE_RX, TREE_BASEY);
+  for (int i = 0; i < GRASS_N; i++)
+    if (overlap(x, y, w, h, GRASS_X[i] - 4, GRASS_Y - 12, 8, 13)) drawGrass(tft, GRASS_X[i], GRASS_Y);
+}
+
+void drawScene(TFT_eSPI& tft) {
+  tft.fillRect(0, 0, 320, HORIZON_Y, SKY_COLOR);
+  tft.fillRect(0, HORIZON_Y, 320, 240 - HORIZON_Y, GROUND_COLOR);
+  drawProps(tft, 0, 0, 320, 240);
+}
+
+void restoreBg(TFT_eSPI& tft, int x, int y, int w, int h) {
+  if (y >= HORIZON_Y) {
+    tft.fillRect(x, y, w, h, GROUND_COLOR);
+  } else if (y + h <= HORIZON_Y) {
+    tft.fillRect(x, y, w, h, SKY_COLOR);
+  } else {                                  // straddles the horizon
+    tft.fillRect(x, y, w, HORIZON_Y - y, SKY_COLOR);
+    tft.fillRect(x, HORIZON_Y, w, (y + h) - HORIZON_Y, GROUND_COLOR);
+  }
+  drawProps(tft, x, y, w, h);
+}
+
 // Image placement aliases (geometry is declared in ui.h so main.cpp can use it).
 static const int IMG_W = GIRAFFE_W, IMG_H = GIRAFFE_H;
 static const int IMG_X = GIRAFFE_X, IMG_Y = GIRAFFE_Y;
@@ -71,7 +129,7 @@ void drawGiraffe(TFT_eSPI& tft, Emotion emotion) {
   if (decodeGiraffe(emotion)) return;
 
   // Fallback if the asset is missing/unreadable — visible, not a blank screen.
-  tft.fillRect(IMG_X, IMG_Y, IMG_W, IMG_H, BG_COLOR);
+  restoreBg(tft, IMG_X, IMG_Y, IMG_W, IMG_H);
   tft.setTextColor(TFT_RED, BG_COLOR);
   tft.setTextDatum(MC_DATUM);
   tft.drawString("giraffe png missing", IMG_X + IMG_W / 2, IMG_Y + IMG_H / 2, 2);
@@ -120,6 +178,31 @@ void drawFood(TFT_eSPI& tft, int x, int y, int r) {
   tft.fillTriangle(x + 1, y - r - 2, x + 7, y - r - 5, x + 4, y - r + 1, TFT_GREEN);  // leaf
 }
 
+void drawDrink(TFT_eSPI& tft, int cx, int cy, int fillPct) {
+  const int w = 18, h = 24;
+  const int x = cx - w / 2, y = cy - h / 2;
+  const int wh = (h - 4) * fillPct / 100;                            // water height
+  tft.fillRect(x + 2, y + h - 2 - wh, w - 4, wh, 0x047F);            // water (blue)
+  if (wh > 2) tft.drawFastHLine(x + 2, y + h - 2 - wh, w - 4, TFT_CYAN);  // surface
+  tft.drawRect(x, y, w, h, TFT_WHITE);                               // glass
+  tft.drawRect(x + 1, y, w - 2, h, 0xC618);
+}
+
+void drawBall(TFT_eSPI& tft, int x, int y, int r) {
+  tft.fillCircle(x, y, r, TFT_RED);
+  tft.drawFastHLine(x - r, y, 2 * r + 1, TFT_WHITE);                 // stripe
+  tft.fillCircle(x - r / 3, y - r / 3, r / 4 + 1, 0xFFFF);           // shine
+}
+
+void drawSparkle(TFT_eSPI& tft, int x, int y, int s, uint16_t color) {
+  if (s <= 0) return;
+  tft.drawFastVLine(x, y - s, 2 * s + 1, color);
+  tft.drawFastHLine(x - s, y, 2 * s + 1, color);
+  const int d = s / 2;                                              // shorter diagonals
+  tft.drawLine(x - d, y - d, x + d, y + d, color);
+  tft.drawLine(x - d, y + d, x + d, y - d, color);
+}
+
 static void drawBookGlyph(TFT_eSPI& tft, const Rect& b) {
   // open-book glyph centered in the button
   const int cx = b.x + b.w / 2;       // spine x
@@ -159,6 +242,6 @@ void drawPoops(TFT_eSPI& tft, uint8_t count) {
   static const int py[Pet::MAX_POOP] = {162, 186, 162, 186};
   for (int i = 0; i < Pet::MAX_POOP; i++) {
     if (i < count) drawPoop(tft, px[i], py[i]);
-    else           tft.fillRect(px[i] - 13, py[i] - 15, 26, 22, BG_COLOR);
+    else           restoreBg(tft, px[i] - 13, py[i] - 15, 26, 22);
   }
 }
