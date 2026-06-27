@@ -2,12 +2,10 @@
 """Convert generated giraffe art (img/*.png) into CYD-ready sprites (data/).
 
 For each emotion: detect & key the flat background, autocrop the giraffe,
-pixelate + scale to fit the 150x160 display rect, and bake the firmware's
-savanna scene (sky band over golden ground) behind the giraffe so the sprite
-tiles seamlessly over the on-screen scene. Source images can be any size.
-
-The two band colors and horizon MUST match the firmware (ui.h: SKY_COLOR
-0x6DBC, GROUND_COLOR 0xCD4B, HORIZON_Y 165, GIRAFFE_Y 34).
+pixelate + scale to fit the 150x160 display rect, and composite it over a
+solid magenta (0xF81F) background. The firmware uses that colour as a
+transparency key when pushing the sprite, so the scene shows through behind
+the giraffe silhouette. Source images can be any size.
 
 Run:  tools/prep_sprite.py            # all emotions
 Tune: PIX (chunkiness), FIT_* (margin), BG_TOL (bg keying).
@@ -20,12 +18,10 @@ FIT_W, FIT_H = 144, 153    # content box inside the rect (leaves a margin)
 PX = 2                     # screen pixels per sprite pixel (chunkiness)
 BG_TOL = 44                # diff vs source bg that counts as foreground
 
-# Savanna bands — must match ui.h after 565 quantization.
-SKY_RGB    = (104, 180, 224)   # 0x6DBC
-GROUND_RGB = (200, 168, 88)    # 0xCD4B
-HORIZON_Y  = 165               # screen y of the horizon
-GIRAFFE_Y  = 34                # screen y of the sprite top
-BAND_ROW   = HORIZON_Y - GIRAFFE_Y   # sprite row where ground starts (131)
+# Transparent key colour baked into every sprite background.
+# Firmware reads buf[0] as the key, so this only needs to be a colour that
+# won't appear inside any giraffe silhouette. RGB888 for RGB565 0xF81F.
+MAGENTA_RGB = (248, 0, 248)
 
 EMOTIONS = ["happy", "hungry", "sad", "excited", "sleepy", "sick", "reading",
             "thirsty", "bored", "dirty"]
@@ -55,14 +51,6 @@ def foreground_mask(im, key, tol):
     return flood.point(lambda p: 0 if p == 128 else 255)
 
 
-def band_canvas():
-    """150x160 sky-over-ground canvas matching the firmware scene."""
-    c = Image.new("RGB", (W, H), SKY_RGB)
-    if BAND_ROW < H:
-        c.paste(Image.new("RGB", (W, H - BAND_ROW), GROUND_RGB), (0, BAND_ROW))
-    return c
-
-
 def prep(src, dst):
     im = Image.open(src).convert("RGB")
     key = corner_key(im)
@@ -88,8 +76,8 @@ def prep(src, dst):
     chunky = small.resize((lw * PX, lh * PX), Image.NEAREST)
     dw, dh = chunky.size
 
-    # composite the giraffe over the savanna bands via its alpha
-    canvas = band_canvas()
+    # composite the giraffe over a solid magenta key colour
+    canvas = Image.new("RGB", (W, H), MAGENTA_RGB)
     canvas.paste(chunky, ((W - dw) // 2, (H - dh) // 2), chunky)
     canvas.save(dst)
 

@@ -15,6 +15,12 @@ static const int GIRAFFE_W = 150, GIRAFFE_H = 160;
 static const int GIRAFFE_X = (320 - GIRAFFE_W) / 2;  // 85
 static const int GIRAFFE_Y = 34;                     // y 34..194
 
+// Sky band: the top rows of the giraffe footprint where clouds/birds/food pass.
+// Composited off-screen each frame and pushed atomically so the giraffe occludes
+// clouds without flicker. Tall enough to fully contain the apple at the mouth
+// (y114) and the lowest cloud/bird (~y91). Covers screen y34..118.
+static const int BAND_H = 84;
+
 // Simple axis-aligned rect with a hit-test, used for the touch feed zone.
 struct Rect {
   int16_t x, y, w, h;
@@ -34,7 +40,12 @@ extern const Rect BOOK_BTN;
 void drawScene(TFT_eSPI& tft);
 void restoreBg(TFT_eSPI& tft, int x, int y, int w, int h);
 void uiSetPhase(uint32_t now);      // set the breeze phase before drawing
-void animateScenery(TFT_eSPI& tft); // redraw swaying grass + trees (call each frame)
+void animateScenery(TFT_eSPI& tft); // redraw swaying grass + trees + open-sky clouds/birds (each frame)
+
+// Composite the sky band (sky + in-box clouds/birds + top giraffe rows) into an
+// off-screen sprite. Caller draws any eat item, then pushSprite(GIRAFFE_X, GIRAFFE_Y).
+void composeSkyBand(TFT_eSprite& band, uint16_t* gbuf);
+bool cloudOrBirdInBox();            // true if a cloud/bird overlaps the giraffe x-range
 
 void drawGiraffe(TFT_eSPI& tft, Emotion emotion);
 bool renderGiraffeToBuffer(uint16_t* dst, Emotion emotion);  // decode into GIRAFFE_W*GIRAFFE_H buffer

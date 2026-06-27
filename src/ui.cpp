@@ -57,31 +57,51 @@ static void drawTree(TFT_eSPI& tft, int bx, int by) {
   tft.fillRect(bx - 10 + sw, by - 61, 20, 4, 0x4440);
 }
 
-// Clouds + birds drift through the sky and pass BEHIND the giraffe: they are
-// clipped out of the occlusion x-range so they vanish behind the pet.
-static const int OCC_L = 82, OCC_R = 238;
-static int s_cloudX[2] = {-999, -999};
-static int s_birdX[3]  = {-999, -999, -999};
+// Clouds + birds drift through the sky. In open sky (left/right of the giraffe)
+// they draw directly to the panel. Where they cross the giraffe x-range they are
+// clipped out of the direct pass and instead composited into the sky-band sprite
+// (composeSkyBand) so the giraffe silhouette occludes them flicker-free.
+static int  s_cloudX[2] = {-999, -999};
+static int  s_birdX[3]  = {-999, -999, -999};
+static bool s_birdUp[3] = {false, false, false};
 static const int CLOUD_Y[2] = {50, 72};
 static const int BIRD_Y[3]  = {58, 86, 66};
+
+// Giraffe box x-edges (screen coords) — the direct cloud/bird pass clips to these.
+static const int BOX_L = GIRAFFE_X, BOX_R = GIRAFFE_X + GIRAFFE_W;  // 85, 235
 
 static void drawCloud(TFT_eSPI& tft, int x, int y) {
   const int dx[4] = {7, 18, 28, 17}, dy[4] = {4, 3, 4, 7};
   const int rx[4] = {8, 10, 7, 20},  ry[4] = {4, 5, 4, 2};
-  for (int k = 0; k < 4; k++) {
-    const int ex = x + dx[k];
-    // skip any puff that would reach into the giraffe zone (edge, not centre),
-    // else its bleed past the boundary never gets erased
-    if (ex + rx[k] > OCC_L && ex - rx[k] < OCC_R) continue;
-    tft.fillEllipse(ex, y + dy[k], rx[k], ry[k], 0xF79E);
-  }
+  for (int k = 0; k < 4; k++)
+    tft.fillEllipse(x + dx[k], y + dy[k], rx[k], ry[k], 0xF79E);
 }
 
+// Direct (panel) cloud draw, pixel-clipped to OUTSIDE the giraffe box so the
+// in-box portion is left to the band sprite. A cloud is only ~44px wide so it
+// straddles at most one box edge; a viewport (vpDatum=false → absolute coords)
+// clips the draw to the outside sliver without dropping whole puffs.
+static void drawCloudDirect(TFT_eSPI& tft, int x, int y) {
+  const int l = x - 4, r = x + 40;
+  if (r <= BOX_L || l >= BOX_R) { drawCloud(tft, x, y); return; }  // fully outside
+  if (l < BOX_L) {                                                 // straddles left edge
+    tft.setViewport(0, 0, BOX_L, HORIZON_Y, false);
+    drawCloud(tft, x, y);
+    tft.resetViewport();
+  } else if (r > BOX_R) {                                          // straddles right edge
+    tft.setViewport(BOX_R, 0, 320 - BOX_R, HORIZON_Y, false);
+    drawCloud(tft, x, y);
+    tft.resetViewport();
+  }
+  // else fully inside the box → the band sprite owns it
+}
+
+// Erase the parts of an old cloud that lie OUTSIDE the giraffe box (the in-box
+// part is owned by the band sprite, which recomposites it).
 static void eraseCloud(TFT_eSPI& tft, int x, int y) {
-  // cloud footprint spans ~x-3..x+38, y-2..y+9 — erase a touch wider
-  const int l0 = x - 4, l1 = min(x + 40, OCC_L);
+  const int l0 = x - 4, l1 = min(x + 40, BOX_L);
   if (l1 > l0) restoreBg(tft, l0, y - 3, l1 - l0, 16);
-  const int r0 = max(x - 4, OCC_R), r1 = x + 40;
+  const int r0 = max(x - 4, BOX_R), r1 = x + 40;
   if (r1 > r0) restoreBg(tft, r0, y - 3, r1 - r0, 16);
 }
 
@@ -99,9 +119,20 @@ static void drawBlade(TFT_eSPI& tft, const Blade& b) {
   tft.drawLine(b.x, b.y, b.x + 2 + dx, b.y - b.h + 2, b.c);
 }
 
-// Re-draw the swaying scenery at the current phase (called each frame). Grass
-// blades are thin lines so they redraw every frame; the trees only redraw when
-// their (integer) sway changes, otherwise the big canopy fill flickers.
+// True if a cloud or bird currently overlaps the giraffe x-range (so the caller
+// knows to compose+push the sky band this frame).
+static bool cloudInBox(int x)  { return x + 40 > BOX_L && x - 4 < BOX_R; }
+static bool birdInBox(int x)   { return x + 9  > BOX_L && x - 1 < BOX_R; }
+
+bool cloudOrBirdInBox() {
+  for (int i = 0; i < 2; i++) if (s_cloudX[i] > -60  && cloudInBox(s_cloudX[i])) return true;
+  for (int i = 0; i < 3; i++) if (s_birdX[i]  > -900 && birdInBox(s_birdX[i]))   return true;
+  return false;
+}
+
+// Re-draw the swaying scenery at the current phase (each frame). Clouds/birds are
+// advanced here and drawn DIRECTLY only in open sky (clipped out of the giraffe
+// box); their in-box portion is handled by composeSkyBand().
 void animateScenery(TFT_eSPI& tft) {
   for (int i = 0; i < GRASS_N; i++) {
     const Blade& b = GRASS[i];
@@ -121,23 +152,51 @@ void animateScenery(TFT_eSPI& tft) {
     lastR = swR;
   }
 
-  // clouds drift slowly; only redraw when they move a pixel
+  // Clouds drift slowly; erase old + draw new, both clipped to outside the box.
   for (int i = 0; i < 2; i++) {
     const int nx = (int)((s_phase / 70 + i * 190) % 400) - 40;
     if (nx != s_cloudX[i]) {
       if (s_cloudX[i] > -60) eraseCloud(tft, s_cloudX[i], CLOUD_Y[i]);
       s_cloudX[i] = nx;
-      drawCloud(tft, nx, CLOUD_Y[i]);
+      drawCloudDirect(tft, nx, CLOUD_Y[i]);
     }
   }
 
-  // birds fly faster and flap; hidden while behind the giraffe
+  // Birds fly and flap; draw direct only while their center is outside the box.
   for (int i = 0; i < 3; i++) {
-    const int nx = (int)((s_phase / 28 + i * 140) % 380) - 20;
+    const int  nx = (int)((s_phase / 28 + i * 140) % 380) - 20;
     const bool up = ((s_phase / 160 + i) & 1);
-    if (s_birdX[i] > -900) restoreBg(tft, s_birdX[i] - 1, BIRD_Y[i] - 3, 10, 8);
-    if (nx + 8 < OCC_L || nx > OCC_R) { drawBird(tft, nx, BIRD_Y[i], up); s_birdX[i] = nx; }
-    else                              { s_birdX[i] = -999; }
+    if (nx != s_birdX[i] || up != s_birdUp[i]) {
+      const bool prevDirect = s_birdX[i] > -900 && !birdInBox(s_birdX[i]);
+      if (prevDirect) restoreBg(tft, s_birdX[i] - 1, BIRD_Y[i] - 3, 10, 8);
+      if (!birdInBox(nx)) drawBird(tft, nx, BIRD_Y[i], up);
+      s_birdX[i] = nx;
+      s_birdUp[i] = up;
+    }
+  }
+}
+
+// Composite the sky band off-screen: sky fill, then all clouds/birds (sprite
+// auto-clips to its bounds), then the top BAND_H giraffe rows overlaid with the
+// magenta key skipped so the giraffe occludes whatever is behind its silhouette.
+//
+// TFT_eSprite::pushImage has NO transparent-colour overload, so we composite the
+// giraffe by hand directly into the band buffer. pushSprite() outputs the buffer
+// raw, so each kept pixel is byte-swapped into the sprite's native order (the
+// same order fillSprite/drawCloud use) — matching gbuf's little-endian PNG bytes.
+void composeSkyBand(TFT_eSprite& band, uint16_t* gbuf) {
+  band.fillSprite(SKY_COLOR);
+  for (int i = 0; i < 2; i++)
+    drawCloud(band, s_cloudX[i] - GIRAFFE_X, CLOUD_Y[i] - GIRAFFE_Y);
+  for (int i = 0; i < 3; i++)
+    drawBird(band, s_birdX[i] - GIRAFFE_X, BIRD_Y[i] - GIRAFFE_Y, s_birdUp[i]);
+
+  uint16_t* dst = (uint16_t*)band.getPointer();
+  const uint16_t key = gbuf[0];
+  const int n = GIRAFFE_W * BAND_H;
+  for (int i = 0; i < n; i++) {
+    const uint16_t p = gbuf[i];
+    if (p != key) dst[i] = (uint16_t)((p << 8) | (p >> 8));
   }
 }
 

@@ -24,101 +24,90 @@ XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 
 Pet pet;
 Emotion lastEmotion;
+static uint16_t giraffeBuf[GIRAFFE_W * GIRAFFE_H];  // persistent sprite buffer (~48 KB)
+TFT_eSprite skyBand = TFT_eSprite(&tft);            // off-screen sky-band compositor
+bool bandOk = false;                                // false if createSprite failed
 bool wasDown = false;
 uint32_t lastTick = 0;
 uint8_t  lastStats[4] = {255, 255, 255, 255};  // force first meter draw
 uint8_t  lastPoop = 255;                        // force first poop draw
 
-// Eating animation: an apple drops into the giraffe's mouth and is eaten in
-// shrinking bites. We capture the face region once (readRect), then each frame
-// restore just that box and redraw the apple on top -> drawn over the giraffe,
-// flicker-free, no per-frame PNG decode.
+// Eating animation: an apple/glass drops into the giraffe's mouth and is eaten in
+// shrinking bites. The item travels entirely within the sky band, so it is drawn
+// INTO the band sprite (after the giraffe overlay) each frame and pushed atomically
+// — no trail, no flicker, even with a cloud overhead.
 static const int      MOUTH_X      = 160;   // giraffe mouth (screen coords)
-static const int      DROP_Y0      = 52;    // apple start (above the head)
-static const int      MOUTH_Y      = 101;   // apple rest (at the mouth)
+static const int      DROP_Y0      = 52;    // item start (above the head)
+static const int      MOUTH_Y      = 101;   // item rest (at the mouth)
 static const int      FOOD_R       = 13;
-static const int      CAP_X = 131, CAP_Y = 34, CAP_W = 60, CAP_H = 88;  // captured face box
 static const uint32_t EAT_DROP_MS  = 450;
 static const uint32_t EAT_BITE_MS  = 200;
 static const int      EAT_BITES    = 3;
 static const uint32_t EAT_TOTAL    = EAT_DROP_MS + EAT_BITE_MS * EAT_BITES;
 
 enum ConsumeKind { CONSUME_APPLE, CONSUME_WATER };
-struct EatAnim { bool active = false; uint32_t start = 0; uint16_t* bg = nullptr; int kind = CONSUME_APPLE; };
+struct EatAnim { bool active = false; uint32_t start = 0; int kind = CONSUME_APPLE; };
 EatAnim eat;
 
-// Repaint the giraffe at its current emotion plus the buttons (used to seed
-// the eating face and to clean up afterwards).
-static void redrawScene() {
-  const Emotion e = pet.emotion();
-  drawGiraffe(tft, e);
-  drawButtons(tft);
+// Push the persistent giraffe buffer to screen. buf[0] (top-left = magenta key)
+// is used as the transparent colour so background pixels are skipped, letting
+// the scene and any clouds/birds drawn before this call show through.
+static void pushGiraffe() {
+  tft.pushImage(GIRAFFE_X, GIRAFFE_Y, GIRAFFE_W, GIRAFFE_H, giraffeBuf, giraffeBuf[0]);
+}
+
+// Refresh the persistent buffer for the given emotion and push to screen.
+// restoreBg the full rect FIRST so a shrinking silhouette (e.g. excited ears
+// drop back down) doesn't leave ghost pixels in newly-transparent areas — the
+// transparent push can only overwrite the solid body, never erase it.
+static void updateGiraffe(Emotion e) {
+  renderGiraffeToBuffer(giraffeBuf, e);
+  restoreBg(tft, GIRAFFE_X, GIRAFFE_Y, GIRAFFE_W, GIRAFFE_H);
+  pushGiraffe();
   lastEmotion = e;
+}
+
+// Repaint the scene after an action (play / clean) resets the display.
+static void redrawScene() {
+  pushGiraffe();
+  drawButtons(tft);
 }
 
 static void startEat(uint32_t now, int kind) {
   eat.kind = kind;
-  redrawScene();             // show the eating (excited) face first
-
-  // Capture the clean face box by decoding the giraffe into a RAM buffer
-  // (same pixel data as the screen draw -> correct colors, no panel readback).
-  eat.bg = nullptr;
-  uint16_t* full = (uint16_t*)malloc((size_t)GIRAFFE_W * GIRAFFE_H * sizeof(uint16_t));
-  if (full) {
-    if (renderGiraffeToBuffer(full, Emotion::Excited)) {
-      eat.bg = (uint16_t*)malloc((size_t)CAP_W * CAP_H * sizeof(uint16_t));
-      if (eat.bg) {
-        for (int row = 0; row < CAP_H; row++) {
-          const int srcRow = (CAP_Y - GIRAFFE_Y) + row;
-          memcpy(&eat.bg[row * CAP_W],
-                 &full[srcRow * GIRAFFE_W + (CAP_X - GIRAFFE_X)],
-                 CAP_W * sizeof(uint16_t));
-        }
-      }
-    }
-    free(full);
-  }
-
+  const Emotion e = pet.emotion();     // Excited after feed/drink
+  if (e != lastEmotion) updateGiraffe(e);
   eat.active = true;
   eat.start = now;
 }
 
-static void tickEat(uint32_t now) {
-  const uint32_t t = now - eat.start;
-  if (t >= EAT_TOTAL) {
-    eat.active = false;
-    if (eat.bg) { free(eat.bg); eat.bg = nullptr; }
-    redrawScene();
-    return;
-  }
-
-  // restore the clean face (erases the previous item under it)
-  if (eat.bg) tft.pushImage(CAP_X, CAP_Y, CAP_W, CAP_H, eat.bg);
-  else        drawGiraffe(tft, Emotion::Excited);  // fallback if capture failed
-
+// Draw the current eat item (apple shrinking / glass draining) into `c` at the
+// offset (ox,oy) — (0,0) for the screen, (GIRAFFE_X,GIRAFFE_Y) for the band sprite.
+static void drawEatItem(TFT_eSPI& c, int ox, int oy, uint32_t t) {
   const bool dropping = t < EAT_DROP_MS;
   int y = MOUTH_Y;
-  if (dropping) {            // drop into the mouth
+  if (dropping) {                      // drop into the mouth
     const float p = (float)t / EAT_DROP_MS;
     y = DROP_Y0 + (int)((MOUTH_Y - DROP_Y0) * p);
   }
   const int step = dropping ? -1 : (int)((t - EAT_DROP_MS) / EAT_BITE_MS);  // 0..EAT_BITES-1
 
-  if (eat.kind == CONSUME_WATER) {   // glass drains in gulps
+  if (eat.kind == CONSUME_WATER) {     // glass drains in gulps
     int fill = dropping ? 100 : 100 - (step + 1) * 100 / EAT_BITES;
     if (fill < 0) fill = 0;
-    drawDrink(tft, MOUTH_X, y, fill);
-  } else {                           // apple shrinks in bites
+    drawDrink(c, MOUTH_X - ox, y - oy, fill);
+  } else {                             // apple shrinks in bites
     int r = dropping ? FOOD_R : FOOD_R - step * (FOOD_R / EAT_BITES + 1);
     if (r < 2) r = 2;
-    drawFood(tft, MOUTH_X, y, r);
+    drawFood(c, MOUTH_X - ox, y - oy, r);
   }
 }
 
 // Sleep animation: "Z" glyphs drift up-and-right from beside the head while
-// sleeping. They live in the background (right of the sprite) so each frame
-// erases cleanly with a background fill.
-static const int      SLEEP_X0 = 214, SLEEP_Y0 = 98;   // start (lower-left, by the head)
+// sleeping. They start just RIGHT of the giraffe box (x>=236) so they live in
+// open sky and the band-sprite push never clobbers them; each frame erases
+// cleanly with a background fill.
+static const int      SLEEP_X0 = 238, SLEEP_Y0 = 98;   // start (lower-left, by the head)
 static const int      SLEEP_X1 = 276, SLEEP_Y1 = 46;   // end (upper-right)
 static const uint32_t SLEEP_CYCLE_MS = 2400;
 static const int      SLEEP_ZS = 3;
@@ -237,6 +226,13 @@ void setup() {
   tft.init();
   tft.setRotation(1);            // landscape 320x240
   tft.setSwapBytes(true);        // RGB565 byte order for pushImage (PNG decode)
+
+  // Off-screen sky-band compositor (~25 KB). The giraffe is composited into it by
+  // hand (see composeSkyBand), so no swapBytes setting is needed on the sprite.
+  skyBand.setColorDepth(16);
+  bandOk = (skyBand.createSprite(GIRAFFE_W, BAND_H) != nullptr);
+  if (!bandOk) Serial.println("skyBand createSprite failed — clouds will clip at giraffe edge");
+
   drawScene(tft);
 
   if (!LittleFS.begin()) {
@@ -248,7 +244,7 @@ void setup() {
   ts.setRotation(1);
 
   lastEmotion = pet.emotion();
-  drawGiraffe(tft, lastEmotion);
+  updateGiraffe(lastEmotion);
   drawButtons(tft);
   drawMeters(tft, pet.hunger(), pet.thirst(), pet.fun(), pet.hygiene());
   drawPoops(tft, pet.poopCount());
@@ -283,18 +279,22 @@ void loop() {
   }
   wasDown = down;
 
-  // While eating, the animation owns the giraffe area; skip emotion redraws.
+  animateScenery(tft);   // grass/trees + open-sky clouds/birds (clipped to box edges)
+
+  // Giraffe ownership: handle eat expiry, emotion changes and ambient animations.
   if (eat.active) {
-    tickEat(now);
+    if (now - eat.start >= EAT_TOTAL) {
+      eat.active = false;
+      updateGiraffe(pet.emotion());   // clean repaint, no food
+    }
   } else {
     // Redraw the giraffe only when the emotion actually changes (covers both
     // hunger-driven and time-driven transitions, e.g. excited -> happy).
     const Emotion e = pet.emotion();
     if (e != lastEmotion) {
       if (slp.active) stopSleep();   // clear Z's before switching sprite
-      drawGiraffe(tft, e);
+      updateGiraffe(e);
       drawButtons(tft);
-      lastEmotion = e;
     }
     // Run the ambient sleep animation while sleepy.
     if (e == Emotion::Sleepy) {
@@ -309,6 +309,23 @@ void loop() {
     if (cln.active)   tickClean(now);
   }
 
+  // Composite + push the sky band whenever a cloud/bird overlaps the giraffe or
+  // we're eating. One extra push after the last object leaves (wasBand) cleans
+  // the band region. Falls back to a direct draw if the sprite failed to alloc.
+  const bool bandNow = cloudOrBirdInBox() || eat.active;
+  static bool wasBand = false;
+  if (bandOk) {
+    if (bandNow || wasBand) {
+      composeSkyBand(skyBand, giraffeBuf);
+      if (eat.active) drawEatItem(skyBand, GIRAFFE_X, GIRAFFE_Y, now - eat.start);
+      skyBand.pushSprite(GIRAFFE_X, GIRAFFE_Y);
+    }
+  } else if (eat.active) {
+    pushGiraffe();
+    drawEatItem(tft, 0, 0, now - eat.start);
+  }
+  wasBand = bandNow;
+
   // Redraw the meters the instant any stat changes (action or decay).
   const uint8_t hu = pet.hunger(), th = pet.thirst(), fn = pet.fun(), hy = pet.hygiene();
   if (hu != lastStats[0] || th != lastStats[1] || fn != lastStats[2] || hy != lastStats[3]) {
@@ -322,8 +339,6 @@ void loop() {
     drawPoops(tft, pc);
     lastPoop = pc;
   }
-
-  animateScenery(tft);   // gentle breeze sway (grass + trees)
 
   delay(10);
 }
