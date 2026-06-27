@@ -103,54 +103,34 @@ static void drawEatItem(TFT_eSPI& c, int ox, int oy, uint32_t t) {
   }
 }
 
-// Sleep animation: "Z" glyphs drift up-and-right from beside the head while
-// sleeping. They start just RIGHT of the giraffe box (x>=236) so they live in
-// open sky and the band-sprite push never clobbers them; each frame erases
-// cleanly with a background fill.
-static const int      SLEEP_X0 = 238, SLEEP_Y0 = 98;   // start (lower-left, by the head)
-static const int      SLEEP_X1 = 276, SLEEP_Y1 = 46;   // end (upper-right)
+// Sleep animation: "Z" glyphs drift up-and-right beside the head while sleeping.
+// Composited INTO the band (in front of the giraffe) each frame, so they need no
+// manual erase and can sit right next to the head (inside the giraffe box).
+static const int      SLEEP_X0 = 202, SLEEP_Y0 = 86;   // start (by the head, lower-left)
+static const int      SLEEP_X1 = 216, SLEEP_Y1 = 42;   // end (upper-right)
 static const uint32_t SLEEP_CYCLE_MS = 2400;
 static const int      SLEEP_ZS = 3;
 
-struct SleepAnim {
-  bool active = false;
-  uint32_t start = 0;
-  int lx[SLEEP_ZS], ly[SLEEP_ZS], ls[SLEEP_ZS];   // last drawn glyph box per slot
-};
+struct SleepAnim { bool active = false; uint32_t start = 0; };
 SleepAnim slp;
 
-static void eraseZ(int i) {
-  if (slp.lx[i] > -900)
-    restoreBg(tft, slp.lx[i] - 1, slp.ly[i] - 1, 6 * slp.ls[i] + 3, 8 * slp.ls[i] + 3);
-  slp.lx[i] = -999;
-}
+static void startSleep(uint32_t now) { slp.active = true; slp.start = now; }
+static void stopSleep() { slp.active = false; }
 
-static void startSleep(uint32_t now) {
-  slp.active = true;
-  slp.start = now;
-  for (int i = 0; i < SLEEP_ZS; i++) slp.lx[i] = -999;
-}
-
-static void stopSleep() {
-  for (int i = 0; i < SLEEP_ZS; i++) eraseZ(i);
-  slp.active = false;
-}
-
-static void tickSleep(uint32_t now) {
-  tft.setTextColor(TFT_NAVY);   // transparent background
+// Draw the rising Z's into the band sprite at local coords (band clips to bounds).
+static void drawSleepZ(TFT_eSPI& c, uint32_t now) {
+  c.setTextColor(TFT_NAVY);   // transparent background
   for (int i = 0; i < SLEEP_ZS; i++) {
     const uint32_t ph = (now - slp.start + (uint32_t)i * (SLEEP_CYCLE_MS / SLEEP_ZS)) % SLEEP_CYCLE_MS;
     const float p = (float)ph / SLEEP_CYCLE_MS;
-    const int x = SLEEP_X0 + (int)((SLEEP_X1 - SLEEP_X0) * p);
-    const int y = SLEEP_Y0 + (int)((SLEEP_Y1 - SLEEP_Y0) * p);
+    const int x = SLEEP_X0 + (int)((SLEEP_X1 - SLEEP_X0) * p) - GIRAFFE_X;
+    const int y = SLEEP_Y0 + (int)((SLEEP_Y1 - SLEEP_Y0) * p) - GIRAFFE_Y;
     const int s = 1 + (int)(p * 2.0f);          // grows 1 -> 3 as it rises
-    eraseZ(i);
-    tft.setTextSize(s);
-    tft.setCursor(x, y);
-    tft.print("Z");
-    slp.lx[i] = x; slp.ly[i] = y; slp.ls[i] = s;
+    c.setTextSize(s);
+    c.setCursor(x, y);
+    c.print("Z");
   }
-  tft.setTextSize(1);   // restore so other text (meters, buttons) is normal
+  c.setTextSize(1);   // restore so other text (meters, buttons) is normal
 }
 
 // Play animation: a ball bounces a few times in the left background lane
@@ -296,10 +276,9 @@ void loop() {
       updateGiraffe(e);
       drawButtons(tft);
     }
-    // Run the ambient sleep animation while sleepy.
+    // Sleep state (Z's are drawn into the band below while active).
     if (e == Emotion::Sleepy) {
       if (!slp.active) startSleep(now);
-      tickSleep(now);
     } else if (slp.active) {
       stopSleep();
     }
@@ -309,22 +288,18 @@ void loop() {
     if (cln.active)   tickClean(now);
   }
 
-  // Composite + push the sky band whenever a cloud/bird overlaps the giraffe or
-  // we're eating. One extra push after the last object leaves (wasBand) cleans
-  // the band region. Falls back to a direct draw if the sprite failed to alloc.
-  const bool bandNow = cloudOrBirdInBox() || eat.active;
-  static bool wasBand = false;
+  // Composite + push the full giraffe footprint every frame: the in-box grass
+  // sways continuously so the band is always refreshing. One atomic push keeps
+  // clouds (top) and grass (feet) occluded by the silhouette, no flicker.
   if (bandOk) {
-    if (bandNow || wasBand) {
-      composeSkyBand(skyBand, giraffeBuf);
-      if (eat.active) drawEatItem(skyBand, GIRAFFE_X, GIRAFFE_Y, now - eat.start);
-      skyBand.pushSprite(GIRAFFE_X, GIRAFFE_Y);
-    }
+    composeSkyBand(skyBand, giraffeBuf);
+    if (eat.active) drawEatItem(skyBand, GIRAFFE_X, GIRAFFE_Y, now - eat.start);
+    if (slp.active) drawSleepZ(skyBand, now);
+    skyBand.pushSprite(GIRAFFE_X, GIRAFFE_Y);
   } else if (eat.active) {
     pushGiraffe();
     drawEatItem(tft, 0, 0, now - eat.start);
   }
-  wasBand = bandNow;
 
   // Redraw the meters the instant any stat changes (action or decay).
   const uint8_t hu = pet.hunger(), th = pet.thirst(), fn = pet.fun(), hy = pet.hygiene();

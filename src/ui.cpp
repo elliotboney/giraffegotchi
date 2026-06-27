@@ -31,6 +31,20 @@ static const Blade GRASS[] = {
 };
 static const int GRASS_N = sizeof(GRASS) / sizeof(GRASS[0]);
 
+// Grass that sits BEHIND the giraffe (x within the box 85..235). Drawn only into
+// the band sprite, so the legs occlude it and it peeks through between/around them.
+// Same three depth rows as the surrounding scene (back/mid/front) so it matches.
+static const Blade GRASS_BOX[] = {
+  // back row (short, dark, gentle)
+  {100,172,5,1,0x2A40}, {140,173,4,1,0x2A40}, {176,172,5,2,0x2A40}, {214,171,4,1,0x2A40},
+  // mid row (medium)
+  {110,183,8,2,0x3B80}, {158,184,7,2,0x3B80}, {200,182,8,2,0x3B80},
+  // front row (tall, bright)
+  { 96,193,10,3,0x4DA0}, {130,192,11,4,0x4DA0}, {164,193,11,4,0x4DA0},
+  {198,192,10,3,0x4DA0}, {226,191, 9,3,0x4DA0},
+};
+static const int GRASS_BOX_N = sizeof(GRASS_BOX) / sizeof(GRASS_BOX[0]);
+
 static uint32_t s_phase = 0;                 // breeze phase (ms); set each frame by main
 void uiSetPhase(uint32_t now) { s_phase = now; }
 
@@ -111,12 +125,15 @@ static void drawBird(TFT_eSPI& tft, int x, int y, bool up) {
   else    { tft.drawLine(x, y,     x + 3, y + 2, c); tft.drawLine(x + 3, y + 2, x + 6, y,     c); }
 }
 
-static void drawBlade(TFT_eSPI& tft, const Blade& b) {
+// Draw a blade at its screen position minus (xo,yo) — (0,0) for the panel, or
+// (GIRAFFE_X,GIRAFFE_Y) to draw into the band sprite's local coordinates.
+static void drawBlade(TFT_eSPI& tft, const Blade& b, int xo = 0, int yo = 0) {
   // tip bends by the breeze; x-shifted phase makes the blades ripple
   const int dx = (int)(b.amp * sinf((s_phase + b.x * 9) / 360.0f));
-  tft.drawLine(b.x, b.y, b.x - 2 + dx, b.y - b.h + 2, b.c);
-  tft.drawLine(b.x, b.y, b.x     + dx, b.y - b.h,     b.c);
-  tft.drawLine(b.x, b.y, b.x + 2 + dx, b.y - b.h + 2, b.c);
+  const int bx = b.x - xo, by = b.y - yo;
+  tft.drawLine(bx, by, bx - 2 + dx, by - b.h + 2, b.c);
+  tft.drawLine(bx, by, bx     + dx, by - b.h,     b.c);
+  tft.drawLine(bx, by, bx + 2 + dx, by - b.h + 2, b.c);
 }
 
 // True if a cloud or bird currently overlaps the giraffe x-range (so the caller
@@ -185,11 +202,17 @@ void animateScenery(TFT_eSPI& tft) {
 // raw, so each kept pixel is byte-swapped into the sprite's native order (the
 // same order fillSprite/drawCloud use) — matching gbuf's little-endian PNG bytes.
 void composeSkyBand(TFT_eSprite& band, uint16_t* gbuf) {
-  band.fillSprite(SKY_COLOR);
+  // sky above the horizon, golden ground below (horizon in band-local rows)
+  const int horizonRow = HORIZON_Y - GIRAFFE_Y;
+  band.fillRect(0, 0, GIRAFFE_W, horizonRow, SKY_COLOR);
+  band.fillRect(0, horizonRow, GIRAFFE_W, BAND_H - horizonRow, GROUND_COLOR);
+
   for (int i = 0; i < 2; i++)
     drawCloud(band, s_cloudX[i] - GIRAFFE_X, CLOUD_Y[i] - GIRAFFE_Y);
   for (int i = 0; i < 3; i++)
     drawBird(band, s_birdX[i] - GIRAFFE_X, BIRD_Y[i] - GIRAFFE_Y, s_birdUp[i]);
+  for (int i = 0; i < GRASS_BOX_N; i++)
+    drawBlade(band, GRASS_BOX[i], GIRAFFE_X, GIRAFFE_Y);
 
   uint16_t* dst = (uint16_t*)band.getPointer();
   const uint16_t key = gbuf[0];

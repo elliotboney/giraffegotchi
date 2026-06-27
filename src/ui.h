@@ -15,11 +15,11 @@ static const int GIRAFFE_W = 150, GIRAFFE_H = 160;
 static const int GIRAFFE_X = (320 - GIRAFFE_W) / 2;  // 85
 static const int GIRAFFE_Y = 34;                     // y 34..194
 
-// Sky band: the top rows of the giraffe footprint where clouds/birds/food pass.
-// Composited off-screen each frame and pushed atomically so the giraffe occludes
-// clouds without flicker. Tall enough to fully contain the apple at the mouth
-// (y114) and the lowest cloud/bird (~y91). Covers screen y34..118.
-static const int BAND_H = 84;
+// Compositing band: covers the FULL giraffe footprint. Built off-screen each
+// frame (sky+ground+clouds+birds+grass) and the giraffe is overlaid with the
+// magenta key skipped, then pushed atomically so everything behind the giraffe
+// (clouds up top, grass at the feet) is occluded by the silhouette, no flicker.
+static const int BAND_H = GIRAFFE_H;
 
 // Simple axis-aligned rect with a hit-test, used for the touch feed zone.
 struct Rect {
