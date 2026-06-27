@@ -3,3 +3,9 @@
 
 # Local reference art, not for version control
 docs/other_giraffes/
+
+# Agent / tooling scaffolding, not part of the project
+.agents/
+.claude/
+_bmad/
+_bmad-output/
