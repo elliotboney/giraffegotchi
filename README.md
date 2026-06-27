@@ -1,5 +1,9 @@
 # Giraffegotchi
 
+<img width="523" height="388" alt="image" src="https://github.com/user-attachments/assets/f9c86c1c-1b28-4a17-929a-1d7cde17333a" />
+
+
+
 A Tamagotchi-style digital pet (a giraffe) running on an ESP32 **"Cheap Yellow Display" (CYD)**. Feed it, water it, play with it, clean up after it — all on a 240×320 touchscreen sitting in a hand-drawn savanna with drifting clouds, flapping birds, and swaying acacia trees.
 
 ## Hardware
