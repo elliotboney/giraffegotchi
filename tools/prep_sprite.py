@@ -26,6 +26,13 @@ MAGENTA_RGB = (248, 0, 248)
 EMOTIONS = ["happy", "hungry", "sad", "excited", "sleepy", "sick", "reading",
             "thirsty", "bored", "dirty"]
 
+# Extra animation frames (not pet emotions): alternate happy faces cycled on a
+# timer, and the two kick poses for the beach-ball play animation.
+FRAMES = ["happy2", "happy3", "kick1", "kick2"]
+
+# Square props from img/objects/ -> data/<name>.png. (name, sprite size px).
+OBJECTS = [("beach_ball", 80)]
+
 
 def corner_key(im):
     px = im.load()
@@ -82,18 +89,48 @@ def prep(src, dst):
     canvas.save(dst)
 
 
+def prep_object(src, dst, size, margin=2):
+    """Same bg-keying as prep(), but output a square `size` sprite (used for
+    props like the beach ball) over the magenta key."""
+    im = Image.open(src).convert("RGB")
+    key = corner_key(im)
+    fg = foreground_mask(im, key, BG_TOL)
+    rgba = im.convert("RGBA")
+    rgba.putalpha(fg)
+    crop = rgba.crop(fg.getbbox())
+
+    fit = size - 2 * margin
+    cw, ch = crop.size
+    lw = max(1, round(cw * fit / max(cw, ch) / PX))
+    lh = max(1, round(ch * fit / max(cw, ch) / PX))
+    chunky = crop.resize((lw, lh), Image.NEAREST).resize((lw * PX, lh * PX), Image.NEAREST)
+    dw, dh = chunky.size
+
+    canvas = Image.new("RGB", (size, size), MAGENTA_RGB)
+    canvas.paste(chunky, ((size - dw) // 2, (size - dh) // 2), chunky)
+    canvas.save(dst)
+
+
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     src_dir = os.path.join(root, "img")
     out_dir = os.path.join(root, "data")
     os.makedirs(out_dir, exist_ok=True)
-    for e in EMOTIONS:
+    for e in EMOTIONS + FRAMES:
         src = os.path.join(src_dir, f"{e}.png")
         if not os.path.exists(src):
             print("skip (missing):", src)
             continue
         dst = os.path.join(out_dir, f"giraffe_{e}.png")
         prep(src, dst)
+        print("wrote", dst)
+    for name, size in OBJECTS:
+        src = os.path.join(src_dir, "objects", f"{name}.png")
+        if not os.path.exists(src):
+            print("skip (missing):", src)
+            continue
+        dst = os.path.join(out_dir, f"{name}.png")
+        prep_object(src, dst, size)
         print("wrote", dst)
 
 

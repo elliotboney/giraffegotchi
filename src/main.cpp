@@ -25,6 +25,10 @@ XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 Pet pet;
 Emotion lastEmotion;
 static uint16_t giraffeBuf[GIRAFFE_W * GIRAFFE_H];  // persistent sprite buffer (~48 KB)
+static const int BALL_PX = 80;                      // beach-ball sprite size
+TFT_eSprite ballSpr = TFT_eSprite(&tft);            // beach ball (rotatable sprite, heap-allocated)
+static bool ballOk = false;
+static const uint16_t BALL_KEY = 0xF81F;            // magenta transparent key
 TFT_eSprite skyBand = TFT_eSprite(&tft);            // off-screen sky-band compositor
 bool bandOk = false;                                // false if createSprite failed
 bool wasDown = false;
@@ -72,6 +76,14 @@ static void redrawScene() {
   pushGiraffe();
   drawButtons(tft);
 }
+
+// Alternate happy faces cycled on a timer so the idle face isn't static. Loading
+// a new frame into giraffeBuf is enough — the band composites it next push.
+static const char* HAPPY_FRAMES[] = {"/giraffe_happy.png", "/giraffe_happy2.png", "/giraffe_happy3.png"};
+static const int      HAPPY_FRAME_N  = 3;
+static const uint32_t HAPPY_FRAME_MS = 3500;
+static int      s_happyIdx  = 0;
+static uint32_t s_happyNext = 0;
 
 static void startEat(uint32_t now, int kind) {
   eat.kind = kind;
@@ -133,39 +145,187 @@ static void drawSleepZ(TFT_eSPI& c, uint32_t now) {
   c.setTextSize(1);   // restore so other text (meters, buttons) is normal
 }
 
-// Play animation: a ball bounces a few times in the left background lane
-// (clear of the giraffe, meters and poop, so it erases with a plain fill).
-static const int      BALL_X       = 42;
-static const int      BALL_GROUND  = 138;
-static const int      BALL_R       = 9;
-static const uint32_t PLAY_MS      = 1400;
-static const int      PLAY_BOUNCES = 3;
+// Play animations rotate through a list on each PLAY press. Butterfly & bubbles
+// composite INTO the band (in front of the giraffe); the kite draws directly in
+// the open left sky. A kick/nudge using a new sprite is reserved as a future
+// 4th kind — add it before PLAY_KINDS and extend PLAY_MS / the band dispatch.
+enum PlayKind { PLAY_BUTTERFLY, PLAY_BUBBLES, PLAY_KITE, PLAY_KICK, PLAY_KINDS };
+static const uint32_t PLAY_MS[PLAY_KINDS] = {2200, 2400, 2600, 2400};
 
-struct PlayAnim { bool active = false; uint32_t start = 0; int ly = -999; };
+struct PlayAnim {
+  bool active = false;
+  uint32_t start = 0;
+  int kind = 0;
+  int kx = -999, ky = -999;        // last kite position (for direct-draw erase)
+  int bx = -999, by = -999;        // last kick-ball direct position (for erase)
+};
 PlayAnim play_;
-
-static void erasePlay() {
-  if (play_.ly > -900)
-    restoreBg(tft, BALL_X - BALL_R - 1, play_.ly - BALL_R - 1, 2 * BALL_R + 2, 2 * BALL_R + 2);
-  play_.ly = -999;
-}
+static int s_playKind = 0;         // advances each press so play varies
+static int s_kickPose = -1;        // which pose is in giraffeBuf (-1 none, 0 normal, 1 kick1, 2 kick2)
 
 static void startPlay(uint32_t now) {
-  redrawScene();
-  play_.active = true; play_.start = now; play_.ly = -999;
+  play_.kind  = s_playKind;
+  s_playKind  = (s_playKind + 1) % PLAY_KINDS;
+  play_.active = true;
+  play_.start  = now;
+  play_.kx = play_.ky = -999;
+  play_.bx = play_.by = -999;
+  s_kickPose = -1;
 }
 
-static void tickPlay(uint32_t now) {
+// Butterfly: a figure-8 flutter around the head, composited into the band.
+static void drawPlayButterfly(TFT_eSPI& band, uint32_t t) {
+  const float ph = (float)t / PLAY_MS[PLAY_BUTTERFLY] * 6.2832f;   // one loop
+  const int x = 160 + (int)(42.0f * sinf(ph))         - GIRAFFE_X;
+  const int y = 80  + (int)(26.0f * sinf(ph * 2.0f))  - GIRAFFE_Y; // figure-8
+  drawButterfly(band, x, y, ((t / 110) & 1));
+}
+
+// Bubbles: rise from the mouth, wobble, pop near the top — composited into the band.
+static void drawPlayBubbles(TFT_eSPI& band, uint32_t t) {
+  for (int i = 0; i < 4; i++) {
+    const int bt = (int)t - i * 480;                  // staggered spawn
+    if (bt < 0) continue;
+    const float life = (float)bt / 1500.0f;
+    if (life >= 1.0f) continue;                       // popped / gone
+    const int x = 160 + (int)(9.0f * sinf(bt / 180.0f + i)) - GIRAFFE_X;
+    const int y = 101 - (int)(54.0f * life)                 - GIRAFFE_Y;
+    if (life > 0.82f) drawSparkle(band, x, y, 3, TFT_WHITE); // pop
+    else              drawBubble(band, x, y, 3 + (i & 1));
+  }
+}
+
+// Kite: swoops side-to-side in the open left sky (x<85) at a FIXED height that
+// keeps its erase box (y26..42) clear of the meters above and the clouds below.
+// Direct draw, so it erases its old box each frame.
+static const int KITE_Y = 32;
+static void eraseKite() {
+  if (play_.kx > -900) restoreBg(tft, play_.kx - 7, KITE_Y - 6, 14, 17);
+  play_.kx = play_.ky = -999;
+}
+
+static void tickPlay(uint32_t now) {                  // direct-draw kinds + expiry
   const uint32_t t = now - play_.start;
-  if (t >= PLAY_MS) { erasePlay(); play_.active = false; return; }
-  const float prog = (float)t / PLAY_MS;
-  const uint32_t bounceMs = PLAY_MS / PLAY_BOUNCES;
-  const float bp = (float)(t % bounceMs) / bounceMs;                 // 0..1 within a bounce
-  const int amp = (int)(82.0f * (1.0f - prog * 0.55f));              // decaying height
-  const int y = BALL_GROUND - (int)(amp * 4.0f * bp * (1.0f - bp));  // parabola arc
-  erasePlay();
-  drawBall(tft, BALL_X, y, BALL_R);
-  play_.ly = y;
+  if (t >= PLAY_MS[play_.kind]) {
+    if (play_.kind == PLAY_KITE) eraseKite();
+    play_.active = false;
+    return;
+  }
+  if (play_.kind == PLAY_KITE) {
+    const int x = 56 + (int)(20.0f * sinf(t / 360.0f));   // swoop x 36..76
+    eraseKite();
+    drawKite(tft, x, KITE_Y, (int)(t / 200));
+    play_.kx = x; play_.ky = KITE_Y;
+  }
+}
+
+// Kick (play kind #4): a beach ball rolls in from the right and the giraffe
+// volleys it up-and-right. The kick poses swap giraffeBuf directly so the kick
+// "owns" the giraffe while active (the loop skips the normal emotion redraw).
+// The ball composites into the band over the giraffe, draws direct in open sky.
+static const int      KICK_BALL_R    = BALL_PX / 2;    // 40 — beach ball half-size (touches the foot)
+static const int      KICK_CONTACT_X = 195;            // ball rest x (at the kicking foot)
+static const int      KICK_REST_Y    = 150;            // ball center on the ground (190 - r)
+static const uint32_t KICK_ROLL_END  = 600;            // ball has rolled in by here
+static const uint32_t KICK_LAUNCH    = 1150;           // leg extends / ball launches (≈0.5s rest)
+
+// Pose in giraffeBuf: 0 = normal (current emotion), 1 = kick1 (windup/recover),
+// 2 = kick2 (full extend). Only re-decodes when the pose actually changes.
+static void setKickPose(int pose) {
+  if (pose == s_kickPose) return;
+  if      (pose == 2) renderSpriteToBuffer(giraffeBuf, "/giraffe_kick2.png");
+  else if (pose == 1) renderSpriteToBuffer(giraffeBuf, "/giraffe_kick1.png");
+  else                renderGiraffeToBuffer(giraffeBuf, pet.emotion());
+  s_kickPose = pose;
+}
+
+static int kickPose(uint32_t t) {
+  if (t < KICK_LAUNCH - 150) return 0;   // roll-in + the ~1s delay (normal pose)
+  if (t < KICK_LAUNCH)       return 1;   // windup cock
+  if (t < KICK_LAUNCH + 200) return 2;   // extend (ball launches at KICK_LAUNCH)
+  if (t < KICK_LAUNCH + 400) return 1;   // recover
+  return 0;                              // settle (ball flying off)
+}
+
+// Deterministic ball screen position: rolls in, rests at the foot, then is
+// volleyed up-and-right off screen.
+static void kickBallPos(uint32_t t, uint32_t T, int& bx, int& by) {
+  if (t < KICK_ROLL_END) {                               // roll in along the ground
+    const float p = (float)t / KICK_ROLL_END;
+    bx = 305 + (int)((KICK_CONTACT_X - 305) * p);
+    by = KICK_REST_Y;
+  } else if (t < KICK_LAUNCH) {                           // rest at the foot (delay + windup)
+    bx = KICK_CONTACT_X; by = KICK_REST_Y;
+  } else {                                                // volleyed up-and-right
+    const float tt = (float)(t - KICK_LAUNCH) / (T - KICK_LAUNCH);
+    bx = KICK_CONTACT_X + (int)(155.0f * tt);
+    by = KICK_REST_Y - (int)(230.0f * tt) + (int)(120.0f * tt * tt);
+  }
+}
+
+// Erase the parts of the old ball OUTSIDE the giraffe box (the in-box part is
+// repainted by the band each frame).
+static void eraseKickBall() {
+  if (play_.bx <= -900) return;
+  const int r = KICK_BALL_R, top = play_.by - r, h = 2 * r + 1;
+  const int lo = GIRAFFE_X, ro = GIRAFFE_X + GIRAFFE_W;
+  const int l = play_.bx - r, rr = play_.bx + r + 1;
+  if (l < lo)  restoreBg(tft, l, top, min(rr, lo) - l, h);
+  if (rr > ro) { const int r0 = max(l, ro); restoreBg(tft, r0, top, rr - r0, h); }
+  play_.bx = play_.by = -999;
+}
+
+// Ball spins with horizontal travel so it looks like it's rolling (stops when it
+// rests, reverses when it's kicked back the other way).
+static int kickBallAngle(int bx) { return (bx - 305) * 3; }
+
+// Rotate the ball into the band (in front of the giraffe) at screen (cx,cy); the
+// band sprite clips it to the giraffe footprint.
+static void drawBallBand(int cx, int cy, int angle) {
+  if (!ballOk) return;
+  skyBand.setPivot(cx - GIRAFFE_X, cy - GIRAFFE_Y);
+  ballSpr.pushRotated(&skyBand, angle, BALL_KEY);
+}
+
+// Rotate the ball directly to the screen, clipped to OUTSIDE the box. pushRotated
+// pushes the sprite's native bytes raw, so swapBytes is turned off around it.
+static void drawBallDirect(int cx, int cy, int angle) {
+  if (!ballOk) return;
+  const int lo = GIRAFFE_X, ro = GIRAFFE_X + GIRAFFE_W;
+  const bool sw = tft.getSwapBytes();
+  tft.setSwapBytes(false);
+  if (cx - KICK_BALL_R < lo) {
+    tft.setViewport(0, 0, lo, 240, false); tft.setPivot(cx, cy);
+    ballSpr.pushRotated(angle, BALL_KEY); tft.resetViewport();
+  }
+  if (cx + KICK_BALL_R > ro) {
+    tft.setViewport(ro, 0, 320 - ro, 240, false); tft.setPivot(cx, cy);
+    ballSpr.pushRotated(angle, BALL_KEY); tft.resetViewport();
+  }
+  tft.setSwapBytes(sw);
+}
+
+static void tickKick(uint32_t now) {
+  const uint32_t t = now - play_.start, T = PLAY_MS[PLAY_KICK];
+  if (t >= T) {                              // done: clean up, restore the giraffe
+    eraseKickBall();
+    drawPoops(tft, pet.poopCount());
+    drawMeters(tft, pet.hunger(), pet.thirst(), pet.fun(), pet.hygiene());
+    play_.active = false;
+    s_kickPose   = -1;
+    updateGiraffe(pet.emotion());
+    drawButtons(tft);
+    return;
+  }
+  setKickPose(kickPose(t));
+
+  int bx, by;
+  kickBallPos(t, T, bx, by);
+  eraseKickBall();                           // restore out-of-box old-ball region
+  drawPoops(tft, pet.poopCount());           // repair poop / meters the ball crossed
+  drawMeters(tft, pet.hunger(), pet.thirst(), pet.fun(), pet.hygiene());
+  drawBallDirect(bx, by, kickBallAngle(bx)); // out-of-box part direct (rotated)
+  play_.bx = bx; play_.by = by;              // in-box part is drawn into the band
 }
 
 // Clean animation: sparkles twinkle over each poop slot as it is swept away.
@@ -225,6 +385,14 @@ void setup() {
 
   lastEmotion = pet.emotion();
   updateGiraffe(lastEmotion);
+  uint16_t* tmp = (uint16_t*)malloc(BALL_PX * BALL_PX * sizeof(uint16_t));
+  if (tmp && renderSpriteToBuffer(tmp, "/beach_ball.png", BALL_PX) && ballSpr.createSprite(BALL_PX, BALL_PX)) {
+    ballSpr.setSwapBytes(true);
+    ballSpr.pushImage(0, 0, BALL_PX, BALL_PX, tmp);   // byte-swaps into the sprite's native order
+    ballSpr.setPivot(BALL_PX / 2, BALL_PX / 2);
+    ballOk = true;
+  }
+  if (tmp) free(tmp);
   drawButtons(tft);
   drawMeters(tft, pet.hunger(), pet.thirst(), pet.fun(), pet.hygiene());
   drawPoops(tft, pet.poopCount());
@@ -267,14 +435,23 @@ void loop() {
       eat.active = false;
       updateGiraffe(pet.emotion());   // clean repaint, no food
     }
+  } else if (play_.active && play_.kind == PLAY_KICK) {
+    tickKick(now);                    // owns giraffeBuf (kick poses) + ball + expiry
   } else {
     // Redraw the giraffe only when the emotion actually changes (covers both
     // hunger-driven and time-driven transitions, e.g. excited -> happy).
     const Emotion e = pet.emotion();
     if (e != lastEmotion) {
       if (slp.active) stopSleep();   // clear Z's before switching sprite
-      updateGiraffe(e);
+      updateGiraffe(e);              // loads happy.png (frame 0) when entering happy
       drawButtons(tft);
+      if (e == Emotion::Happy) { s_happyIdx = 0; s_happyNext = now + HAPPY_FRAME_MS; }
+    }
+    // While happy, rotate through the alternate happy faces on a timer.
+    if (e == Emotion::Happy && now >= s_happyNext) {
+      s_happyIdx = (s_happyIdx + 1) % HAPPY_FRAME_N;
+      renderSpriteToBuffer(giraffeBuf, HAPPY_FRAMES[s_happyIdx]);
+      s_happyNext = now + HAPPY_FRAME_MS;
     }
     // Sleep state (Z's are drawn into the band below while active).
     if (e == Emotion::Sleepy) {
@@ -295,6 +472,14 @@ void loop() {
     composeSkyBand(skyBand, giraffeBuf);
     if (eat.active) drawEatItem(skyBand, GIRAFFE_X, GIRAFFE_Y, now - eat.start);
     if (slp.active) drawSleepZ(skyBand, now);
+    if (play_.active && play_.kind == PLAY_BUTTERFLY) drawPlayButterfly(skyBand, now - play_.start);
+    if (play_.active && play_.kind == PLAY_BUBBLES)   drawPlayBubbles(skyBand, now - play_.start);
+    if (play_.active && play_.kind == PLAY_KICK) {    // in-box ball part -> band (clips)
+      int bx, by;
+      kickBallPos(now - play_.start, PLAY_MS[PLAY_KICK], bx, by);
+      if (bx + KICK_BALL_R > GIRAFFE_X && bx - KICK_BALL_R < GIRAFFE_X + GIRAFFE_W)
+        drawBallBand(bx, by, kickBallAngle(bx));
+    }
     skyBand.pushSprite(GIRAFFE_X, GIRAFFE_Y);
   } else if (eat.active) {
     pushGiraffe();

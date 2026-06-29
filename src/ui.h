@@ -49,6 +49,7 @@ bool cloudOrBirdInBox();            // true if a cloud/bird overlaps the giraffe
 
 void drawGiraffe(TFT_eSPI& tft, Emotion emotion);
 bool renderGiraffeToBuffer(uint16_t* dst, Emotion emotion);  // decode into GIRAFFE_W*GIRAFFE_H buffer
+bool renderSpriteToBuffer(uint16_t* dst, const char* path, int w = GIRAFFE_W);  // decode a w-wide sprite PNG by path
 
 // Top row of four care meters, and the bottom row of five action buttons.
 void drawMeters(TFT_eSPI& tft, uint8_t hunger, uint8_t thirst, uint8_t fun, uint8_t hygiene);
@@ -62,3 +63,6 @@ void drawFood(TFT_eSPI& tft, int x, int y, int r);              // eating: apple
 void drawDrink(TFT_eSPI& tft, int cx, int cy, int fillPct);     // drinking: glass of water
 void drawBall(TFT_eSPI& tft, int x, int y, int r);             // playing: bouncing ball
 void drawSparkle(TFT_eSPI& tft, int x, int y, int s, uint16_t color);  // cleaning: twinkle
+void drawButterfly(TFT_eSPI& c, int x, int y, bool flapOpen);  // play: fluttering butterfly
+void drawBubble(TFT_eSPI& c, int x, int y, int r);             // play: rising soap bubble
+void drawKite(TFT_eSPI& c, int x, int y, int tailPhase);       // play: swooping kite

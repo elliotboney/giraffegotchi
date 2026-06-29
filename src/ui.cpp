@@ -263,11 +263,12 @@ static const int IMG_X = GIRAFFE_X, IMG_Y = GIRAFFE_Y;
 static PNG png;
 static TFT_eSPI* g_tft = nullptr;
 static uint16_t* g_buf = nullptr;
+static int g_bufW = IMG_W;     // row stride for g_buf (sprites can be narrower than the giraffe)
 
 static int pngDraw(PNGDRAW* pDraw) {
-  uint16_t line[IMG_W];
+  uint16_t line[IMG_W];        // IMG_W is the widest sprite (the giraffe)
   png.getLineAsRGB565(pDraw, line, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
-  if (g_buf) memcpy(&g_buf[pDraw->y * IMG_W], line, pDraw->iWidth * sizeof(uint16_t));
+  if (g_buf) memcpy(&g_buf[pDraw->y * g_bufW], line, pDraw->iWidth * sizeof(uint16_t));
   else       g_tft->pushImage(IMG_X, IMG_Y + pDraw->y, pDraw->iWidth, 1, line);
   return 1;  // continue decoding
 }
@@ -288,9 +289,9 @@ static const char* emotionPath(Emotion emotion) {
   }
 }
 
-// Decode the emotion's PNG to the currently-selected target (g_tft or g_buf).
-static bool decodeGiraffe(Emotion emotion) {
-  File f = LittleFS.open(emotionPath(emotion), "r");
+// Decode a PNG at `path` to the currently-selected target (g_tft or g_buf).
+static bool decodePng(const char* path) {
+  File f = LittleFS.open(path, "r");
   if (!f) return false;
   const size_t sz = f.size();
   uint8_t* buf = (uint8_t*)malloc(sz);
@@ -310,6 +311,8 @@ static bool decodeGiraffe(Emotion emotion) {
   return ok;
 }
 
+static bool decodeGiraffe(Emotion emotion) { return decodePng(emotionPath(emotion)); }
+
 void drawGiraffe(TFT_eSPI& tft, Emotion emotion) {
   g_buf = nullptr;
   g_tft = &tft;
@@ -325,9 +328,18 @@ void drawGiraffe(TFT_eSPI& tft, Emotion emotion) {
 // Decode the emotion into a caller-provided IMG_W*IMG_H buffer (same pixel
 // data as the on-screen draw). Returns false if the asset can't be read.
 bool renderGiraffeToBuffer(uint16_t* dst, Emotion emotion) {
-  g_buf = dst;
+  g_buf = dst; g_bufW = IMG_W;
   const bool ok = decodeGiraffe(emotion);
   g_buf = nullptr;
+  return ok;
+}
+
+// Decode an arbitrary sprite PNG (by path) into a w-wide buffer — used for frames
+// that aren't pet emotions (alternate happy faces, kick poses, the beach ball).
+bool renderSpriteToBuffer(uint16_t* dst, const char* path, int w) {
+  g_buf = dst; g_bufW = w;
+  const bool ok = decodePng(path);
+  g_buf = nullptr; g_bufW = IMG_W;
   return ok;
 }
 
@@ -388,6 +400,36 @@ void drawSparkle(TFT_eSPI& tft, int x, int y, int s, uint16_t color) {
   const int d = s / 2;                                              // shorter diagonals
   tft.drawLine(x - d, y - d, x + d, y + d, color);
   tft.drawLine(x - d, y + d, x + d, y - d, color);
+}
+
+void drawButterfly(TFT_eSPI& c, int x, int y, bool flapOpen) {
+  const uint16_t wing = 0xFC60;          // warm orange
+  const uint16_t edge = 0x6180;          // dark body/antennae
+  const int wf = flapOpen ? 7 : 3;       // wing half-width (flaps wide/narrow)
+  const int wh = flapOpen ? 4 : 6;       // taller when folded
+  c.fillEllipse(x - wf, y - 1, wf, wh, wing);          // upper wings
+  c.fillEllipse(x + wf, y - 1, wf, wh, wing);
+  c.fillEllipse(x - wf + 1, y + 3, wf - 1, wh - 1, wing);  // lower wings
+  c.fillEllipse(x + wf - 1, y + 3, wf - 1, wh - 1, wing);
+  c.drawFastVLine(x, y - 5, 11, edge);                 // body
+  c.drawPixel(x - 1, y - 6, edge);                     // antennae
+  c.drawPixel(x + 1, y - 6, edge);
+}
+
+void drawBubble(TFT_eSPI& c, int x, int y, int r) {
+  c.drawCircle(x, y, r, 0xCE79);                       // pale blue-white ring
+  c.drawPixel(x - r / 2, y - r / 2, TFT_WHITE);        // highlight
+}
+
+// Compact kite (~15px tall) so it + its erase box fit the narrow sky gap between
+// the meters (y<=24) and the clouds (y>=43).
+void drawKite(TFT_eSPI& c, int x, int y, int tailPhase) {
+  c.fillTriangle(x, y - 5, x - 5, y, x + 5, y, 0xF800);    // red upper sail
+  c.fillTriangle(x - 5, y, x + 5, y, x, y + 7, 0xFFE0);    // yellow lower sail
+  c.drawLine(x, y - 5, x, y + 7, 0x4208);                  // spine
+  c.drawLine(x - 5, y, x + 5, y, 0x4208);                  // spar
+  const int tx = x + ((tailPhase & 1) ? 2 : -2);           // single tail bow
+  c.fillTriangle(x - 2, y + 7, x + 2, y + 7, tx, y + 10, 0xFB40);
 }
 
 static void drawBookGlyph(TFT_eSPI& tft, const Rect& b) {
