@@ -256,6 +256,43 @@ SleepAnim slp;
 static void startSleep(uint32_t now) { slp.active = true; slp.start = now; }
 static void stopSleep() { slp.active = false; }
 
+// Daydream: an occasional thought bubble above the head while the giraffe is
+// idle and content — hints at what it's thinking about. Composited into the
+// band (in front of the giraffe), like the sleep Z's.
+static const uint32_t DAYDREAM_SHOW_MS = 3800;
+static const uint32_t DAYDREAM_GAP_MS  = 20000;    // quiet gap between daydreams
+static const int      DREAM_ICONS      = 4;
+struct DaydreamAnim { bool active = false; uint32_t start = 0; int icon = 0; uint32_t next = 8000; };
+DaydreamAnim dream;
+
+static void drawHeart(TFT_eSPI& c, int x, int y) {
+  c.fillCircle(x - 2, y - 1, 2, TFT_RED);
+  c.fillCircle(x + 2, y - 1, 2, TFT_RED);
+  c.fillTriangle(x - 4, y, x + 4, y, x, y + 5, TFT_RED);
+}
+static void drawNote(TFT_eSPI& c, int x, int y) {
+  c.fillCircle(x - 2, y + 3, 2, TFT_NAVY);
+  c.fillRect(x, y - 4, 2, 7, TFT_NAVY);
+  c.fillRect(x, y - 4, 5, 2, TFT_NAVY);
+}
+
+// Drawn into the band at local coords; sits just above-left of the head.
+static void drawDaydream(TFT_eSPI& c, uint32_t /*now*/) {
+  const int x = 165 - GIRAFFE_X, y = 46 - GIRAFFE_Y;
+  c.fillCircle(x,     y,     9, TFT_WHITE);          // thought cloud
+  c.fillCircle(x - 9, y + 3, 6, TFT_WHITE);
+  c.fillCircle(x + 9, y + 3, 6, TFT_WHITE);
+  c.fillCircle(x,     y + 6, 6, TFT_WHITE);
+  c.fillCircle(x + 12, y + 14, 2, TFT_WHITE);        // connector dots toward head
+  c.fillCircle(x + 17, y + 19, 1, TFT_WHITE);
+  switch (dream.icon) {                              // the wish
+    case 0:  drawFood(c, x, y, 5);          break;   // apple
+    case 1:  drawHeart(c, x, y);            break;
+    case 2:  drawNote(c, x, y);             break;
+    default: drawButterfly(c, x, y, true);  break;
+  }
+}
+
 // Draw the rising Z's into the band sprite at local coords (band clips to bounds).
 static void drawSleepZ(TFT_eSPI& c, uint32_t now) {
   c.setTextColor(TFT_NAVY);   // transparent background
@@ -617,6 +654,19 @@ void loop() {
       stopSleep();
     }
 
+    // Daydream while idle + content: a thought bubble pops up now and then.
+    const bool idle = (e == Emotion::Happy && !play_.active && !cln.active && !slp.active);
+    if (idle) {
+      if (!dream.active && now >= dream.next) {
+        dream.active = true;  dream.start = now;
+        dream.icon = (dream.icon + 1) % DREAM_ICONS;
+        dream.next = now + DAYDREAM_SHOW_MS + DAYDREAM_GAP_MS;
+      }
+      if (dream.active && now - dream.start >= DAYDREAM_SHOW_MS) dream.active = false;
+    } else {
+      dream.active = false;
+    }
+
     // One-shot action animations (background-safe; run alongside the sprite).
     if (play_.active) tickPlay(now);
     if (cln.active)   tickClean(now);
@@ -629,6 +679,7 @@ void loop() {
     composeSkyBand(skyBand, giraffeBuf);
     if (eat.active) drawEatItem(skyBand, GIRAFFE_X, GIRAFFE_Y, now - eat.start);
     if (slp.active) drawSleepZ(skyBand, now);
+    if (dream.active) drawDaydream(skyBand, now);
     if (play_.active && play_.kind == PLAY_BUTTERFLY) drawPlayButterfly(skyBand, now - play_.start);
     if (play_.active && play_.kind == PLAY_BUBBLES)   drawPlayBubbles(skyBand, now - play_.start);
     if (play_.active && play_.kind == PLAY_KICK) {    // in-box ball part -> band (clips)

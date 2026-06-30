@@ -26,7 +26,6 @@ public:
   static constexpr uint8_t  CLEAN_AMOUNT       = 40;    // +Hygiene (clean is a bigger restore)
 
   static constexpr uint32_t EXCITED_MS         = 2500;  // reaction window after any care action
-  static constexpr uint32_t SLEEPY_MS          = 60000; // idle this long => Sleepy (daytime nap)
   static constexpr uint32_t READING_MS         = 5000;  // how long a "read" lasts
   static constexpr uint32_t SICK_MS            = 20000; // a need empty (hunger or hygiene) this long => Sick
   static constexpr uint32_t NIGHT_WAKE_MS      = 300000;// after a night-time care action, stay awake this long, then sleep again

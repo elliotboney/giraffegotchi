@@ -163,10 +163,10 @@ void test_emotion_sick_from_hunger(void) {
   ASSERT_EMOTION(Emotion::Sick, p);
 }
 
-void test_emotion_sleepy(void) {
+void test_idle_no_daytime_nap(void) {
   Pet p(100);
-  p.update(Pet::SLEEPY_MS);   // idle; stats still healthy enough to not show a need
-  ASSERT_EMOTION(Emotion::Sleepy, p);
+  p.update(Pet::NIGHT_WAKE_MS * 5);   // long idle by day → stays content, no nap
+  ASSERT_EMOTION(Emotion::Happy, p);
 }
 
 void test_emotion_reading(void) {
@@ -263,7 +263,7 @@ int main(int, char**) {
   RUN_TEST(test_emotion_excited_then_expires);
   RUN_TEST(test_emotion_excited_on_drink_and_play);
   RUN_TEST(test_emotion_sick_from_hunger);
-  RUN_TEST(test_emotion_sleepy);
+  RUN_TEST(test_idle_no_daytime_nap);
   RUN_TEST(test_emotion_reading);
   RUN_TEST(test_emotion_thirsty);
   RUN_TEST(test_emotion_bored);

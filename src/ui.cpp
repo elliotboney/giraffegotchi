@@ -229,6 +229,52 @@ static void eraseCelestial(TFT_eSPI& tft, int cx, int cy) {
   if (x + w > r0) restoreBg(tft, r0, y, x + w - r0, h);
 }
 
+// --- ambient critters (time-of-day aware) ---
+// Fireflies blink in the open sky at dusk/night; a butterfly wanders low across
+// the sky by day. All live OUTSIDE the giraffe box so the band never owns them.
+static const int FF_N = 6;
+static const int FF_BX[FF_N] = { 30,  55,  72, 250, 286, 306 };  // all clear of box 85..235
+static const int FF_BY[FF_N] = {136, 150, 126, 142, 130, 152 };
+static int  s_ffX[FF_N]    = {-999,-999,-999,-999,-999,-999};
+static int  s_ffY[FF_N]    = {0};
+static bool s_ffShown[FF_N] = {false};
+static int  s_flutterX = -999, s_flutterY = 0;   // wandering daytime butterfly
+
+static bool flutterInBox(int x) { return x + 8 > BOX_L && x - 8 < BOX_R; }
+
+static void animateCritters(TFT_eSPI& tft) {
+  const bool night = (s_phaseId == PHASE_DUSK || s_phaseId == PHASE_NIGHT);
+  const bool day   = (s_phaseId >= PHASE_DAWN && s_phaseId <= PHASE_AFTERNOON);
+
+  // Fireflies: gentle drift + blink. Erase/redraw only on change (low flicker).
+  for (int i = 0; i < FF_N; i++) {
+    const int nx = FF_BX[i] + (int)(6.0f * sinf((s_phase + i * 900)  / 700.0f));
+    const int ny = FF_BY[i] + (int)(4.0f * sinf((s_phase + i * 1300) / 500.0f));
+    const bool lit = night && (sinf((s_phase + i * 1700) / 420.0f) > 0.25f);
+    if (nx != s_ffX[i] || ny != s_ffY[i] || lit != s_ffShown[i]) {
+      if (s_ffShown[i]) restoreBg(tft, s_ffX[i] - 2, s_ffY[i] - 2, 5, 5);
+      if (lit) { tft.fillCircle(nx, ny, 1, 0xC7E0); tft.drawPixel(nx, ny, 0xFFE0); }
+      s_ffX[i] = nx; s_ffY[i] = ny; s_ffShown[i] = lit;
+    }
+  }
+
+  // Daytime butterfly: drifts across; hidden where it crosses the giraffe (like
+  // the birds). Erase its old open-sky box, draw at the new spot when outside.
+  if (day) {
+    const int nx = (int)((s_phase / 45) % 360) - 20;
+    const int ny = 130 + (int)(8.0f * sinf(s_phase / 260.0f));
+    if (nx != s_flutterX || ny != s_flutterY) {
+      if (s_flutterX > -900 && !flutterInBox(s_flutterX))
+        restoreBg(tft, s_flutterX - 8, s_flutterY - 8, 18, 18);
+      if (!flutterInBox(nx)) drawButterfly(tft, nx, ny, (s_phase / 120) & 1);
+      s_flutterX = nx; s_flutterY = ny;
+    }
+  } else if (s_flutterX > -900) {                 // leaving day → clean up
+    if (!flutterInBox(s_flutterX)) restoreBg(tft, s_flutterX - 8, s_flutterY - 8, 18, 18);
+    s_flutterX = -999;
+  }
+}
+
 // Re-draw the swaying scenery at the current phase (each frame). Clouds/birds are
 // advanced here and drawn DIRECTLY only in open sky (clipped out of the giraffe
 // box); their in-box portion is handled by composeSkyBand().
@@ -288,6 +334,8 @@ void animateScenery(TFT_eSPI& tft) {
   int cbx, cby, cbw, cbh; celestialBox(s_celX, s_celY, cbx, cby, cbw, cbh);
   if (overlap(cbx, cby, cbw, cbh, TREE_LX - 25, TREE_BASEY - 62, 50, 62)) drawTree(tft, TREE_LX, TREE_BASEY);
   if (overlap(cbx, cby, cbw, cbh, TREE_RX - 25, TREE_BASEY - 62, 50, 62)) drawTree(tft, TREE_RX, TREE_BASEY);
+
+  animateCritters(tft);
 }
 
 // Composite the sky band off-screen: sky fill, then all clouds/birds (sprite

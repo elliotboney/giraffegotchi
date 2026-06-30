@@ -93,6 +93,5 @@ Emotion Pet::emotion() const {
     default: break;  // no stat below threshold
   }
 
-  if (sinceFeed_ >= SLEEPY_MS)       return Emotion::Sleepy;
-  return Emotion::Happy;
+  return Emotion::Happy;   // idle by day = content (Sleepy is night-only now)
 }
