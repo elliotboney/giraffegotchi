@@ -37,6 +37,10 @@ public:
   Pet() = default;
   explicit Pet(uint8_t hunger, uint8_t thirst = 100, uint8_t fun = 100, uint8_t hygiene = 100);
 
+  // Restore persisted state (from NVS after a power loss). Values are clamped
+  // so corrupt saved data can't produce out-of-range stats.
+  void load(uint8_t hunger, uint8_t thirst, uint8_t fun, uint8_t hygiene, uint8_t poop);
+
   uint8_t hunger()    const { return stats_[int(StatId::Hunger)];  }
   uint8_t thirst()    const { return stats_[int(StatId::Thirst)];  }
   uint8_t fun()       const { return stats_[int(StatId::Fun)];     }

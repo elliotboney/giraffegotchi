@@ -237,6 +237,25 @@ void test_night_off_is_normal(void) {
   TEST_ASSERT_EQUAL_UINT8(49, p.hunger());      // decays as usual
 }
 
+// ---- persistence ----
+
+void test_load_restores_state(void) {
+  Pet p;
+  p.load(40, 55, 60, 25, 2);
+  TEST_ASSERT_EQUAL_UINT8(40, p.hunger());
+  TEST_ASSERT_EQUAL_UINT8(55, p.thirst());
+  TEST_ASSERT_EQUAL_UINT8(60, p.fun());
+  TEST_ASSERT_EQUAL_UINT8(25, p.hygiene());
+  TEST_ASSERT_EQUAL_UINT8(2,  p.poopCount());
+}
+
+void test_load_clamps_corrupt(void) {
+  Pet p;
+  p.load(200, 200, 200, 200, 99);            // out-of-range (corrupt NVS)
+  TEST_ASSERT_EQUAL_UINT8(100, p.hunger());
+  TEST_ASSERT_EQUAL_UINT8(Pet::MAX_POOP, p.poopCount());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_decay_tick);
@@ -274,5 +293,7 @@ int main(int, char**) {
   RUN_TEST(test_night_sleep_pauses_world);
   RUN_TEST(test_night_wake_on_action);
   RUN_TEST(test_night_off_is_normal);
+  RUN_TEST(test_load_restores_state);
+  RUN_TEST(test_load_clamps_corrupt);
   return UNITY_END();
 }

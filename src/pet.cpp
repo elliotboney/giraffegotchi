@@ -11,6 +11,14 @@ Pet::Pet(uint8_t hunger, uint8_t thirst, uint8_t fun, uint8_t hygiene) {
   stats_[int(StatId::Hygiene)] = hygiene;
 }
 
+void Pet::load(uint8_t hunger, uint8_t thirst, uint8_t fun, uint8_t hygiene, uint8_t poop) {
+  stats_[int(StatId::Hunger)]  = hunger  > 100 ? 100 : hunger;
+  stats_[int(StatId::Thirst)]  = thirst  > 100 ? 100 : thirst;
+  stats_[int(StatId::Fun)]     = fun     > 100 ? 100 : fun;
+  stats_[int(StatId::Hygiene)] = hygiene > 100 ? 100 : hygiene;
+  poop_ = poop > MAX_POOP ? MAX_POOP : poop;
+}
+
 void Pet::add(StatId s, uint8_t amount) {
   uint16_t v = (uint16_t)stats_[int(s)] + amount;
   stats_[int(s)] = v > 100 ? 100 : (uint8_t)v;

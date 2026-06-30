@@ -5,6 +5,7 @@
 #include <XPT2046_Touchscreen.h>
 #include <WiFi.h>
 #include <time.h>
+#include <Preferences.h>
 #include "pet.h"
 #include "ui.h"
 
@@ -50,6 +51,26 @@ XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 
 Pet pet;
 Emotion lastEmotion;
+
+// Persisted care state (survives power loss). Saved to NVS on change (throttled)
+// and restored on boot. Restore is as-is — a power cut doesn't age the giraffe.
+Preferences prefs;
+struct PetSave { uint8_t magic, hu, th, fn, hy, poop; };
+static const uint8_t  SAVE_MAGIC = 0x67;     // bump if PetSave layout changes
+static bool     s_saveDirty = false;
+static uint32_t s_lastSave  = 0;
+
+static void saveState() {
+  const PetSave s{ SAVE_MAGIC, pet.hunger(), pet.thirst(), pet.fun(), pet.hygiene(), pet.poopCount() };
+  prefs.putBytes("pet", &s, sizeof(s));
+}
+static void loadState() {
+  PetSave s;
+  if (prefs.getBytes("pet", &s, sizeof(s)) == sizeof(s) && s.magic == SAVE_MAGIC) {
+    pet.load(s.hu, s.th, s.fn, s.hy, s.poop);
+    Serial.printf("[save] restored H%u T%u F%u C%u poop%u\n", s.hu, s.th, s.fn, s.hy, s.poop);
+  }
+}
 static uint16_t* giraffeBuf = nullptr;  // persistent sprite buffer (~48 KB, heap — keeps it out of static DRAM so the WiFi stack fits)
 static const int BALL_PX = 80;                      // beach-ball sprite size
 TFT_eSprite ballSpr = TFT_eSprite(&tft);            // beach ball (rotatable sprite, heap-allocated)
@@ -579,6 +600,9 @@ void setup() {
   ts.begin(touchSPI);
   ts.setRotation(1);
 
+  prefs.begin("giraffe", false);   // NVS namespace
+  loadState();                     // restore care stats from before the power loss
+
   lastEmotion = pet.emotion();
   updateGiraffe(lastEmotion);
   uint16_t* tmp = (uint16_t*)malloc(BALL_PX * BALL_PX * sizeof(uint16_t));
@@ -754,6 +778,7 @@ void loop() {
   if (hu != lastStats[0] || th != lastStats[1] || fn != lastStats[2] || hy != lastStats[3]) {
     drawMeters(tft, hu, th, fn, hy);
     lastStats[0] = hu; lastStats[1] = th; lastStats[2] = fn; lastStats[3] = hy;
+    s_saveDirty = true;
   }
 
   // Redraw poop when the count changes (spawn or clean).
@@ -761,6 +786,14 @@ void loop() {
   if (pc != lastPoop) {
     drawPoops(tft, pc);
     lastPoop = pc;
+    s_saveDirty = true;
+  }
+
+  // Persist care state on change, throttled to spare the flash (≤ once / 5 s).
+  if (s_saveDirty && now - s_lastSave >= 5000) {
+    saveState();
+    s_lastSave = now;
+    s_saveDirty = false;
   }
 
   delay(10);
