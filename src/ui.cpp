@@ -37,6 +37,7 @@ static SkyPhase s_phaseId = PHASE_DAY;
 // Celestial body, positioned each tick by main along an arc (setCelestial).
 static int  s_celX = 288, s_celY = 52;
 static bool s_celSun = true;
+static bool s_celForce = true;   // force a redraw next frame (after a sky repaint)
 void setCelestial(int cx, int cy, bool isSun) { s_celX = cx; s_celY = cy; s_celSun = isSun; }
 
 // Stars (night only) — fixed dots in the OPEN sky (clear of the giraffe box
@@ -64,20 +65,6 @@ static const Blade GRASS[] = {
   {245,195,11,4,0x4DA0}, {289,196,11,4,0x4DA0}, {313,194,10,4,0x4DA0},
 };
 static const int GRASS_N = sizeof(GRASS) / sizeof(GRASS[0]);
-
-// Grass that sits BEHIND the giraffe (x within the box 85..235). Drawn only into
-// the band sprite, so the legs occlude it and it peeks through between/around them.
-// Same three depth rows as the surrounding scene (back/mid/front) so it matches.
-static const Blade GRASS_BOX[] = {
-  // back row (short, dark, gentle)
-  {100,172,5,1,0x2A40}, {140,173,4,1,0x2A40}, {176,172,5,2,0x2A40}, {214,171,4,1,0x2A40},
-  // mid row (medium)
-  {110,183,8,2,0x3B80}, {158,184,7,2,0x3B80}, {200,182,8,2,0x3B80},
-  // front row (tall, bright)
-  { 96,193,10,3,0x4DA0}, {130,192,11,4,0x4DA0}, {164,193,11,4,0x4DA0},
-  {198,192,10,3,0x4DA0}, {226,191, 9,3,0x4DA0},
-};
-static const int GRASS_BOX_N = sizeof(GRASS_BOX) / sizeof(GRASS_BOX[0]);
 
 static uint32_t s_phase = 0;                 // breeze phase (ms); set each frame by main
 void uiSetPhase(uint32_t now) { s_phase = now; }
@@ -111,9 +98,7 @@ static void drawStars(TFT_eSPI& tft, int x, int y, int w, int h) {
       tft.drawPixel(STARS[i].x, STARS[i].y, 0xFFFF);
 }
 
-static int treeSway(int bx) {
-  return (int)(2.0f * sinf((s_phase + bx * 40) / 900.0f));   // slow canopy sway, -2..2
-}
+static int treeSway(int) { return 0; }   // sway disabled — trees stand still
 
 static void drawTree(TFT_eSPI& tft, int bx, int by) {
   const int sw = treeSway(bx);
@@ -284,19 +269,6 @@ void animateScenery(TFT_eSPI& tft) {
     tft.fillRect(b.x - (b.amp + 3), b.y - b.h - 1, 2 * (b.amp + 3), b.h + 2, GROUND_COLOR);
     drawBlade(tft, b);
   }
-  static int lastL = 99, lastR = 99;
-  const int swL = treeSway(TREE_LX), swR = treeSway(TREE_RX);
-  if (swL != lastL) {
-    tft.fillRect(TREE_LX - 25, TREE_BASEY - 62, 50, 19, SKY_COLOR);
-    drawTree(tft, TREE_LX, TREE_BASEY);
-    lastL = swL;
-  }
-  if (swR != lastR) {
-    tft.fillRect(TREE_RX - 25, TREE_BASEY - 62, 50, 19, SKY_COLOR);
-    drawTree(tft, TREE_RX, TREE_BASEY);
-    lastR = swR;
-  }
-
   // Clouds drift slowly; erase old + draw new, both clipped to outside the box.
   for (int i = 0; i < 2; i++) {
     const int nx = (int)((s_phase / 70 + i * 190) % 400) - 40;
@@ -320,20 +292,19 @@ void animateScenery(TFT_eSPI& tft) {
     }
   }
 
-  // Sun/moon arc: erase the old open-sky position when it moves, then redraw at
-  // the current spot every frame (in front of the clouds, behind the giraffe).
-  static int celPrevX = -999, celPrevY = -999;
-  if (s_celX != celPrevX || s_celY != celPrevY) {
-    if (celPrevX > -900) eraseCelestial(tft, celPrevX, celPrevY);
-    celPrevX = s_celX; celPrevY = s_celY;
+  // Sun/moon arc: redraw ONLY when it moves (or after a sky repaint via
+  // s_celForce). Redrawing every frame flashed where the trees occlude it —
+  // the moon flickered through the canopy. Erase old, draw new, re-occlude.
+  static int celDrawnX = -999, celDrawnY = -999;
+  if (s_celForce || s_celX != celDrawnX || s_celY != celDrawnY) {
+    if (celDrawnX > -900 && !s_celForce) eraseCelestial(tft, celDrawnX, celDrawnY);
+    drawCelestialDirect(tft);
+    int cbx, cby, cbw, cbh; celestialBox(s_celX, s_celY, cbx, cby, cbw, cbh);
+    if (overlap(cbx, cby, cbw, cbh, TREE_LX - 25, TREE_BASEY - 62, 50, 62)) drawTree(tft, TREE_LX, TREE_BASEY);
+    if (overlap(cbx, cby, cbw, cbh, TREE_RX - 25, TREE_BASEY - 62, 50, 62)) drawTree(tft, TREE_RX, TREE_BASEY);
+    celDrawnX = s_celX; celDrawnY = s_celY;
+    s_celForce = false;
   }
-  drawCelestialDirect(tft);
-
-  // A low rising/setting sun overlaps the trees — redraw any it touches so the
-  // canopy occludes it (sun sinks behind the tree).
-  int cbx, cby, cbw, cbh; celestialBox(s_celX, s_celY, cbx, cby, cbw, cbh);
-  if (overlap(cbx, cby, cbw, cbh, TREE_LX - 25, TREE_BASEY - 62, 50, 62)) drawTree(tft, TREE_LX, TREE_BASEY);
-  if (overlap(cbx, cby, cbw, cbh, TREE_RX - 25, TREE_BASEY - 62, 50, 62)) drawTree(tft, TREE_RX, TREE_BASEY);
 
   animateCritters(tft);
 }
@@ -356,8 +327,6 @@ void composeSkyBand(TFT_eSprite& band, uint16_t* gbuf) {
     drawCloud(band, s_cloudX[i] - GIRAFFE_X, CLOUD_Y[i] - GIRAFFE_Y);
   for (int i = 0; i < 3; i++)
     drawBird(band, s_birdX[i] - GIRAFFE_X, BIRD_Y[i] - GIRAFFE_Y, s_birdUp[i]);
-  for (int i = 0; i < GRASS_BOX_N; i++)
-    drawBlade(band, GRASS_BOX[i], GIRAFFE_X, GIRAFFE_Y);
   // Sun/moon behind the giraffe (band auto-clips to its bounds); the giraffe
   // overlay below then occludes whatever the silhouette covers.
   drawCelestialAt(band, s_celX - GIRAFFE_X, s_celY - GIRAFFE_Y);
@@ -631,6 +600,7 @@ void setSkyPhase(SkyPhase p) {
   s_phaseId    = p;
   SKY_COLOR    = PALETTES[p].sky;
   GROUND_COLOR = PALETTES[p].ground;
+  s_celForce   = true;   // a phase repaint wipes the sky → redraw the sun/moon
 }
 
 SkyPhase currentSkyPhase() { return s_phaseId; }

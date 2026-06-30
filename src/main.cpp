@@ -212,6 +212,27 @@ static const uint32_t HAPPY_FRAME_MS = 3500;
 static int      s_happyIdx  = 0;
 static uint32_t s_happyNext = 0;
 
+// Idle tics: short sprite sequences that play every few seconds while content,
+// layered over the happy-face rotation, then return to the current happy frame.
+//   blink:  open -> blink -> blink2(closed) -> blink3(opening) -> open
+//   ears:   perk up -> down -> back
+//   tail:   swish to the left -> back
+static const char* BLINK_FR[] = {"/giraffe_blink.png", "/giraffe_blink2.png", "/giraffe_blink3.png"};
+static const char* EARS_FR[]  = {"/giraffe_ears_up.png", "/giraffe_ears_down.png"};
+static const char* TAIL_FR[]  = {"/giraffe_tail_left.png"};
+struct Tic { const char* const* frames; int n; uint32_t holdMs; };
+static const Tic TICS[] = {
+  {BLINK_FR, 3, 90},
+  {EARS_FR,  2, 150},
+  {TAIL_FR,  1, 220},
+};
+static const int TIC_N = 3;
+static bool     s_ticActive   = false;
+static int      s_ticKind     = 0;
+static int      s_ticIdx      = 0;
+static uint32_t s_ticStepNext = 0;
+static uint32_t s_ticNext     = 5000;          // next tic start time
+
 static void startEat(uint32_t now, int kind) {
   eat.kind = kind;
   const Emotion e = pet.emotion();     // Excited after feed/drink
@@ -276,21 +297,26 @@ static void drawNote(TFT_eSPI& c, int x, int y) {
   c.fillRect(x, y - 4, 5, 2, TFT_NAVY);
 }
 
-// Drawn into the band at local coords; sits just above-left of the head.
+// Drawn DIRECTLY to the panel in the open sky to the right of the giraffe (clear
+// of its face), with connector dots pointing back toward the head.
+static const int DREAM_CX = 230, DREAM_CY = 44;
 static void drawDaydream(TFT_eSPI& c, uint32_t /*now*/) {
-  const int x = 165 - GIRAFFE_X, y = 46 - GIRAFFE_Y;
+  const int x = DREAM_CX, y = DREAM_CY;
   c.fillCircle(x,     y,     9, TFT_WHITE);          // thought cloud
   c.fillCircle(x - 9, y + 3, 6, TFT_WHITE);
   c.fillCircle(x + 9, y + 3, 6, TFT_WHITE);
   c.fillCircle(x,     y + 6, 6, TFT_WHITE);
-  c.fillCircle(x + 12, y + 14, 2, TFT_WHITE);        // connector dots toward head
-  c.fillCircle(x + 17, y + 19, 1, TFT_WHITE);
+  c.fillCircle(x - 13, y + 13, 2, TFT_WHITE);        // connector dots down-left to head
+  c.fillCircle(x - 18, y + 18, 1, TFT_WHITE);
   switch (dream.icon) {                              // the wish
     case 0:  drawFood(c, x, y, 5);          break;   // apple
     case 1:  drawHeart(c, x, y);            break;
     case 2:  drawNote(c, x, y);             break;
     default: drawButterfly(c, x, y, true);  break;
   }
+}
+static void eraseDaydream(TFT_eSPI& c) {
+  restoreBg(c, DREAM_CX - 21, DREAM_CY - 10, 39, 31);
 }
 
 // Draw the rising Z's into the band sprite at local coords (band clips to bounds).
@@ -639,13 +665,36 @@ void loop() {
       if (slp.active) stopSleep();   // clear Z's before switching sprite
       updateGiraffe(e);              // loads happy.png (frame 0) when entering happy
       drawButtons(tft);
-      if (e == Emotion::Happy) { s_happyIdx = 0; s_happyNext = now + HAPPY_FRAME_MS; }
+      if (e == Emotion::Happy) {
+        s_happyIdx = 0; s_happyNext = now + HAPPY_FRAME_MS;
+        s_ticActive = false; s_ticNext = now + 4000;
+      }
     }
-    // While happy, rotate through the alternate happy faces on a timer.
-    if (e == Emotion::Happy && now >= s_happyNext) {
-      s_happyIdx = (s_happyIdx + 1) % HAPPY_FRAME_N;
-      renderSpriteToBuffer(giraffeBuf, HAPPY_FRAMES[s_happyIdx]);
-      s_happyNext = now + HAPPY_FRAME_MS;
+    // While happy: play an occasional idle tic; otherwise rotate the faces.
+    if (e == Emotion::Happy) {
+      if (s_ticActive) {                           // step through the tic's frames
+        const Tic& t = TICS[s_ticKind];
+        if (now >= s_ticStepNext) {
+          s_ticIdx++;
+          if (s_ticIdx < t.n) {
+            renderSpriteToBuffer(giraffeBuf, t.frames[s_ticIdx]);
+            s_ticStepNext = now + t.holdMs;
+          } else {                                 // tic done -> current happy face
+            s_ticActive = false;
+            renderSpriteToBuffer(giraffeBuf, HAPPY_FRAMES[s_happyIdx]);
+            s_ticNext = now + 3500 + (now % 5000); // 3.5–8.5 s until the next tic
+          }
+        }
+      } else if (now >= s_ticNext) {               // start the next tic (cycles kinds)
+        s_ticKind = (s_ticKind + 1) % TIC_N;
+        s_ticActive = true; s_ticIdx = 0;
+        renderSpriteToBuffer(giraffeBuf, TICS[s_ticKind].frames[0]);
+        s_ticStepNext = now + TICS[s_ticKind].holdMs;
+      } else if (now >= s_happyNext) {             // idle face rotation
+        s_happyIdx = (s_happyIdx + 1) % HAPPY_FRAME_N;
+        renderSpriteToBuffer(giraffeBuf, HAPPY_FRAMES[s_happyIdx]);
+        s_happyNext = now + HAPPY_FRAME_MS;
+      }
     }
     // Sleep state (Z's are drawn into the band below while active).
     if (e == Emotion::Sleepy) {
@@ -679,7 +728,6 @@ void loop() {
     composeSkyBand(skyBand, giraffeBuf);
     if (eat.active) drawEatItem(skyBand, GIRAFFE_X, GIRAFFE_Y, now - eat.start);
     if (slp.active) drawSleepZ(skyBand, now);
-    if (dream.active) drawDaydream(skyBand, now);
     if (play_.active && play_.kind == PLAY_BUTTERFLY) drawPlayButterfly(skyBand, now - play_.start);
     if (play_.active && play_.kind == PLAY_BUBBLES)   drawPlayBubbles(skyBand, now - play_.start);
     if (play_.active && play_.kind == PLAY_KICK) {    // in-box ball part -> band (clips)
@@ -693,6 +741,13 @@ void loop() {
     pushGiraffe();
     drawEatItem(tft, 0, 0, now - eat.start);
   }
+
+  // Daydream bubble: drawn last, in the open sky beside the giraffe. Redraw it
+  // every frame while active (stays on top of drifting birds); erase on end.
+  static bool dreamDrawn = false;
+  const bool showDream = dream.active && !eat.active && !play_.active && !cln.active && !slp.active;
+  if (showDream) { drawDaydream(tft, now); dreamDrawn = true; }
+  else if (dreamDrawn) { eraseDaydream(tft); dreamDrawn = false; }
 
   // Redraw the meters the instant any stat changes (action or decay).
   const uint8_t hu = pet.hunger(), th = pet.thirst(), fn = pet.fun(), hy = pet.hygiene();
