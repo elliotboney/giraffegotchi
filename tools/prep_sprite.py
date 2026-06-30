@@ -29,7 +29,7 @@ EMOTIONS = ["happy", "hungry", "sad", "excited", "sleepy", "sick", "reading",
 # Extra animation frames (not pet emotions): alternate happy faces, kick poses,
 # the 3-frame idle blink, and the ear/tail idle tics.
 FRAMES = ["happy2", "happy3", "kick1", "kick2", "blink", "blink2", "blink3",
-          "ears_up", "ears_down", "tail_left"]
+          "ears_up", "ears_down", "tail_left", "dead"]
 
 # Square props from img/objects/ -> data/<name>.png. (name, sprite size px).
 OBJECTS = [("beach_ball", 80)]

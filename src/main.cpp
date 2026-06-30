@@ -55,20 +55,24 @@ Emotion lastEmotion;
 // Persisted care state (survives power loss). Saved to NVS on change (throttled)
 // and restored on boot. Restore is as-is — a power cut doesn't age the giraffe.
 Preferences prefs;
-struct PetSave { uint8_t magic, hu, th, fn, hy, poop; };
-static const uint8_t  SAVE_MAGIC = 0x67;     // bump if PetSave layout changes
+bool s_dead = false;                         // prank death state (persisted)
+struct PetSave { uint8_t magic, hu, th, fn, hy, poop, dead; };
+static const uint8_t  SAVE_MAGIC = 0x68;     // bump if PetSave layout changes
 static bool     s_saveDirty = false;
 static uint32_t s_lastSave  = 0;
 
 static void saveState() {
-  const PetSave s{ SAVE_MAGIC, pet.hunger(), pet.thirst(), pet.fun(), pet.hygiene(), pet.poopCount() };
+  const PetSave s{ SAVE_MAGIC, pet.hunger(), pet.thirst(), pet.fun(),
+                   pet.hygiene(), pet.poopCount(), (uint8_t)s_dead };
   prefs.putBytes("pet", &s, sizeof(s));
 }
 static void loadState() {
   PetSave s;
   if (prefs.getBytes("pet", &s, sizeof(s)) == sizeof(s) && s.magic == SAVE_MAGIC) {
     pet.load(s.hu, s.th, s.fn, s.hy, s.poop);
-    Serial.printf("[save] restored H%u T%u F%u C%u poop%u\n", s.hu, s.th, s.fn, s.hy, s.poop);
+    s_dead = s.dead != 0;
+    Serial.printf("[save] restored H%u T%u F%u C%u poop%u dead%u\n",
+                  s.hu, s.th, s.fn, s.hy, s.poop, s.dead);
   }
 }
 static uint16_t* giraffeBuf = nullptr;  // persistent sprite buffer (~48 KB, heap — keeps it out of static DRAM so the WiFi stack fits)
@@ -308,36 +312,49 @@ struct DaydreamAnim { bool active = false; uint32_t start = 0; int icon = 0; uin
 DaydreamAnim dream;
 
 static void drawHeart(TFT_eSPI& c, int x, int y) {
-  c.fillCircle(x - 2, y - 1, 2, TFT_RED);
-  c.fillCircle(x + 2, y - 1, 2, TFT_RED);
-  c.fillTriangle(x - 4, y, x + 4, y, x, y + 5, TFT_RED);
+  c.fillCircle(x - 3, y - 2, 3, TFT_RED);
+  c.fillCircle(x + 3, y - 2, 3, TFT_RED);
+  c.fillTriangle(x - 6, y, x + 6, y, x, y + 8, TFT_RED);
 }
 static void drawNote(TFT_eSPI& c, int x, int y) {
-  c.fillCircle(x - 2, y + 3, 2, TFT_NAVY);
-  c.fillRect(x, y - 4, 2, 7, TFT_NAVY);
-  c.fillRect(x, y - 4, 5, 2, TFT_NAVY);
+  c.fillCircle(x - 3, y + 4, 3, TFT_NAVY);
+  c.fillRect(x, y - 6, 3, 11, TFT_NAVY);
+  c.fillRect(x, y - 6, 7, 3, TFT_NAVY);
 }
 
-// Drawn DIRECTLY to the panel in the open sky to the right of the giraffe (clear
-// of its face), with connector dots pointing back toward the head.
-static const int DREAM_CX = 230, DREAM_CY = 44;
-static void drawDaydream(TFT_eSPI& c, uint32_t /*now*/) {
-  const int x = DREAM_CX, y = DREAM_CY;
-  c.fillCircle(x,     y,     9, TFT_WHITE);          // thought cloud
-  c.fillCircle(x - 9, y + 3, 6, TFT_WHITE);
-  c.fillCircle(x + 9, y + 3, 6, TFT_WHITE);
-  c.fillCircle(x,     y + 6, 6, TFT_WHITE);
-  c.fillCircle(x - 13, y + 13, 2, TFT_WHITE);        // connector dots down-left to head
-  c.fillCircle(x - 18, y + 18, 1, TFT_WHITE);
-  switch (dream.icon) {                              // the wish
-    case 0:  drawFood(c, x, y, 5);          break;   // apple
+// Thought bubble (1.5x). It straddles the giraffe-box edge, so it's drawn in two
+// parts: the in-box part INTO the band (pushed atomically, no flicker), and the
+// open-sky part direct to the panel. DREAM_CX/CY is the cloud centre (screen).
+static const int DREAM_CX = 230, DREAM_CY = 42;
+
+static void drawDreamShape(TFT_eSPI& c, int x, int y) {
+  c.fillCircle(x,      y,      14, TFT_WHITE);        // thought cloud
+  c.fillCircle(x - 14, y + 5,   9, TFT_WHITE);
+  c.fillCircle(x + 14, y + 5,   9, TFT_WHITE);
+  c.fillCircle(x,      y + 9,   9, TFT_WHITE);
+  c.fillCircle(x - 21, y + 21,  3, TFT_WHITE);        // connector dots down-left to head
+  c.fillCircle(x - 28, y + 28,  2, TFT_WHITE);
+  switch (dream.icon) {                               // the wish
+    case 0:  drawFood(c, x, y, 8);          break;    // apple
     case 1:  drawHeart(c, x, y);            break;
     case 2:  drawNote(c, x, y);             break;
     default: drawButterfly(c, x, y, true);  break;
   }
 }
-static void eraseDaydream(TFT_eSPI& c) {
-  restoreBg(c, DREAM_CX - 21, DREAM_CY - 10, 39, 31);
+// In-box part -> band (local coords; the sprite auto-clips to its bounds).
+static void drawDaydreamBand(TFT_eSprite& band) {
+  drawDreamShape(band, DREAM_CX - GIRAFFE_X, DREAM_CY - GIRAFFE_Y);
+}
+// Open-sky part -> panel, viewport-clipped to OUTSIDE the giraffe box.
+static void drawDaydreamDirect(TFT_eSPI& c) {
+  const int boxR = GIRAFFE_X + GIRAFFE_W;
+  c.setViewport(boxR, 0, 320 - boxR, HORIZON_Y, false);
+  drawDreamShape(c, DREAM_CX, DREAM_CY);
+  c.resetViewport();
+}
+static void eraseDaydream(TFT_eSPI& c) {               // only the open-sky part persists
+  const int boxR = GIRAFFE_X + GIRAFFE_W;
+  restoreBg(c, boxR, DREAM_CY - 16, 320 - boxR, 52);
 }
 
 // Draw the rising Z's into the band sprite at local coords (band clips to bounds).
@@ -568,15 +585,34 @@ static void tickClean(uint32_t now) {
   }
 }
 
+// --- backlight dimming ---
+// Full brightness normally; dims after a few minutes of no touch, back to full
+// on any tap. PWM the backlight pin via ledc.
+static const int      BL_CH        = 0;        // ledc channel
+static const uint8_t  BL_FULL      = 255;
+static const uint8_t  BL_DIM       = 28;       // ~11% — visibly dim, not off
+static const uint32_t DIM_AFTER_MS = 5 * 60 * 1000;   // idle this long -> dim
+static uint32_t s_lastInteract = 0;
+static bool     s_dimmed       = false;
+
+static void backlight(uint8_t level) { ledcWrite(BL_CH, level); }
+static void wakeScreen(uint32_t now) {
+  s_lastInteract = now;
+  if (s_dimmed) { backlight(BL_FULL); s_dimmed = false; }
+}
+
 void setup() {
   Serial.begin(115200);
-
-  pinMode(TFT_BL, OUTPUT);
-  digitalWrite(TFT_BL, HIGH);
 
   tft.init();
   tft.setRotation(1);            // landscape 320x240
   tft.setSwapBytes(true);        // RGB565 byte order for pushImage (PNG decode)
+
+  // Backlight PWM AFTER tft.init() — init() drives TFT_BL in digital mode, which
+  // would otherwise override the ledc channel.
+  ledcSetup(BL_CH, 5000, 8);          // 5 kHz, 8-bit
+  ledcAttachPin(TFT_BL, BL_CH);
+  backlight(BL_FULL);
 
   giraffeBuf = (uint16_t*)malloc(GIRAFFE_W * GIRAFFE_H * sizeof(uint16_t));
   if (!giraffeBuf) Serial.println("giraffeBuf malloc failed — giraffe won't render");
@@ -604,7 +640,8 @@ void setup() {
   loadState();                     // restore care stats from before the power loss
 
   lastEmotion = pet.emotion();
-  updateGiraffe(lastEmotion);
+  if (s_dead) { renderSpriteToBuffer(giraffeBuf, "/giraffe_dead.png"); pushGiraffe(); }
+  else        updateGiraffe(lastEmotion);
   uint16_t* tmp = (uint16_t*)malloc(BALL_PX * BALL_PX * sizeof(uint16_t));
   if (tmp && renderSpriteToBuffer(tmp, "/beach_ball.png", BALL_PX) && ballSpr.createSprite(BALL_PX, BALL_PX)) {
     ballSpr.setSwapBytes(true);
@@ -620,12 +657,40 @@ void setup() {
   lastStats[2] = pet.fun();    lastStats[3] = pet.hygiene();
   lastPoop = pet.poopCount();
   lastTick = millis();
+  s_lastInteract = lastTick;
+}
+
+// --- prank: rapid-tap death ---
+// Mashing the care buttons fast "kills" the giraffe (dead sprite); mashing the
+// BOOK button fast brings it back, reset to full. A gag, not real pet logic.
+static const uint32_t FAST_TAP_MS     = 350;   // taps closer than this count as "fast"
+static const int      FAST_TAP_DIE    = 6;     // fast care-button taps in a row -> die
+static const int      FAST_TAP_REVIVE = 6;     // fast BOOK taps in a row while dead -> revive
+static uint32_t s_lastTap   = 0;
+static int      s_tapStreak = 0;
+
+static void die() {
+  s_dead = true; s_tapStreak = 0;
+  eat.active = play_.active = cln.active = slp.active = dream.active = false;
+  renderSpriteToBuffer(giraffeBuf, "/giraffe_dead.png");   // band shows it next frame
+  saveState();                                             // death survives a power cycle
+  Serial.println("[prank] the giraffe has perished — mash the book to revive");
+}
+
+static void revive() {
+  s_dead = false; s_tapStreak = 0;
+  pet.load(100, 100, 100, 100, 0);          // back to full
+  updateGiraffe(pet.emotion());             // sets lastEmotion + repaints
+  lastStats[0] = lastStats[1] = lastStats[2] = lastStats[3] = 255;  // force meter redraw
+  lastPoop = 255;
+  saveState();
+  Serial.println("[prank] revived — good as new");
 }
 
 void loop() {
   const uint32_t now = millis();
 
-  pet.update(now - lastTick);
+  if (!s_dead) pet.update(now - lastTick);   // frozen while dead
   lastTick = now;
   uiSetPhase(now);   // advance the breeze for the grass sway
 
@@ -658,23 +723,46 @@ void loop() {
   if (down && !wasDown) {
     TS_Point p = ts.getPoint();
     if (p.z > 0) {  // ignore ghost / zero-pressure reads
+      wakeScreen(now);   // any tap restores full brightness
       // NOTE: if the FEED button doesn't respond in landscape on your unit,
       // the touch axes are swapped — map p.y to sx and p.x to sy instead.
       const int sx = constrain(map(p.x, TS_MINX, TS_MAXX, 0, tft.width()),  0, tft.width()  - 1);
       const int sy = constrain(map(p.y, TS_MINY, TS_MAXY, 0, tft.height()), 0, tft.height() - 1);
-      if      (FEED_BTN.contains(sx, sy))  { pet.feed();  startEat(now, CONSUME_APPLE); }
-      else if (DRINK_BTN.contains(sx, sy)) { pet.drink(); startEat(now, CONSUME_WATER); }
-      else if (PLAY_BTN.contains(sx, sy))  { pet.play();  startPlay(now); }
-      else if (CLEAN_BTN.contains(sx, sy)) { const uint8_t n = pet.poopCount(); pet.clean(); startClean(now, n); }
-      else if (BOOK_BTN.contains(sx, sy))  pet.read();
+      const bool fast = (now - s_lastTap < FAST_TAP_MS);
+      s_lastTap = now;
+
+      if (s_dead) {
+        // Only fast mashing of the BOOK button brings it back.
+        if (BOOK_BTN.contains(sx, sy)) {
+          s_tapStreak = fast ? s_tapStreak + 1 : 1;
+          if (s_tapStreak >= FAST_TAP_REVIVE) revive();
+        }
+      } else {
+        bool care = true;
+        if      (FEED_BTN.contains(sx, sy))  { pet.feed();  startEat(now, CONSUME_APPLE); }
+        else if (DRINK_BTN.contains(sx, sy)) { pet.drink(); startEat(now, CONSUME_WATER); }
+        else if (PLAY_BTN.contains(sx, sy))  { pet.play();  startPlay(now); }
+        else if (CLEAN_BTN.contains(sx, sy)) { const uint8_t n = pet.poopCount(); pet.clean(); startClean(now, n); }
+        else { if (BOOK_BTN.contains(sx, sy)) pet.read(); care = false; }
+        if (care) {                                  // fast care-button mashing kills it
+          s_tapStreak = fast ? s_tapStreak + 1 : 1;
+          if (s_tapStreak >= FAST_TAP_DIE) die();
+        }
+      }
     }
   }
   wasDown = down;
 
+  // Dim the backlight after a stretch of no touches.
+  if (!s_dimmed && now - s_lastInteract > DIM_AFTER_MS) { backlight(BL_DIM); s_dimmed = true; }
+
   animateScenery(tft);   // grass/trees + open-sky clouds/birds (clipped to box edges)
 
   // Giraffe ownership: handle eat expiry, emotion changes and ambient animations.
-  if (eat.active) {
+  // Skipped entirely while dead — the dead sprite stays in the buffer.
+  if (s_dead) {
+    // nothing: the band below composites the dead sprite each frame
+  } else if (eat.active) {
     if (now - eat.start >= EAT_TOTAL) {
       eat.active = false;
       updateGiraffe(pet.emotion());   // clean repaint, no food
@@ -748,10 +836,12 @@ void loop() {
   // Composite + push the full giraffe footprint every frame: the in-box grass
   // sways continuously so the band is always refreshing. One atomic push keeps
   // clouds (top) and grass (feet) occluded by the silhouette, no flicker.
+  const bool showDream = dream.active && !eat.active && !play_.active && !cln.active && !slp.active;
   if (bandOk) {
     composeSkyBand(skyBand, giraffeBuf);
     if (eat.active) drawEatItem(skyBand, GIRAFFE_X, GIRAFFE_Y, now - eat.start);
     if (slp.active) drawSleepZ(skyBand, now);
+    if (showDream)  drawDaydreamBand(skyBand);   // in-box part, atomic with the push
     if (play_.active && play_.kind == PLAY_BUTTERFLY) drawPlayButterfly(skyBand, now - play_.start);
     if (play_.active && play_.kind == PLAY_BUBBLES)   drawPlayBubbles(skyBand, now - play_.start);
     if (play_.active && play_.kind == PLAY_KICK) {    // in-box ball part -> band (clips)
@@ -766,11 +856,10 @@ void loop() {
     drawEatItem(tft, 0, 0, now - eat.start);
   }
 
-  // Daydream bubble: drawn last, in the open sky beside the giraffe. Redraw it
-  // every frame while active (stays on top of drifting birds); erase on end.
+  // Daydream bubble: the open-sky part is drawn direct (the in-box part went into
+  // the band above). Erase the open-sky part when the bubble ends.
   static bool dreamDrawn = false;
-  const bool showDream = dream.active && !eat.active && !play_.active && !cln.active && !slp.active;
-  if (showDream) { drawDaydream(tft, now); dreamDrawn = true; }
+  if (showDream) { drawDaydreamDirect(tft); dreamDrawn = true; }
   else if (dreamDrawn) { eraseDaydream(tft); dreamDrawn = false; }
 
   // Redraw the meters the instant any stat changes (action or decay).
