@@ -3,8 +3,34 @@
 #include <LittleFS.h>
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
+#include <WiFi.h>
+#include <time.h>
 #include "pet.h"
 #include "ui.h"
+
+// Injected from .env by tools/load_env.py. Fallbacks keep the build working
+// without a .env (firmware just stays in daytime — no WiFi/time).
+#ifndef WIFI_SSID
+#define WIFI_SSID ""
+#endif
+#ifndef WIFI_PW
+#define WIFI_PW ""
+#endif
+#ifndef TZ
+#define TZ "CST6CDT,M3.2.0,M11.1.0"   // US Central w/ DST
+#endif
+#ifndef LAT
+#define LAT 30.0858f
+#endif
+#ifndef LON
+#define LON -97.8403f
+#endif
+
+// TEMP: cycle all 4 sky phases every few seconds, ignoring the real clock, so
+// the day/night look can be verified without waiting for dusk. Set to 0 (then
+// reflash) for normal time-driven behaviour.
+#define DAYNIGHT_DEMO 0
+#define DAYNIGHT_DEMO_MS 300   // ~29 s per simulated day at +15 min/step
 
 // CYD resistive touch (XPT2046) on its own SPI bus
 #define XPT2046_IRQ  36
@@ -24,7 +50,7 @@ XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 
 Pet pet;
 Emotion lastEmotion;
-static uint16_t giraffeBuf[GIRAFFE_W * GIRAFFE_H];  // persistent sprite buffer (~48 KB)
+static uint16_t* giraffeBuf = nullptr;  // persistent sprite buffer (~48 KB, heap — keeps it out of static DRAM so the WiFi stack fits)
 static const int BALL_PX = 80;                      // beach-ball sprite size
 TFT_eSprite ballSpr = TFT_eSprite(&tft);            // beach ball (rotatable sprite, heap-allocated)
 static bool ballOk = false;
@@ -75,6 +101,107 @@ static void updateGiraffe(Emotion e) {
 static void redrawScene() {
   pushGiraffe();
   drawButtons(tft);
+}
+
+// Full-screen repaint after a day/night phase flip: sky, ground and the
+// celestial body all change, so everything layered on top is redrawn.
+static void repaintScene() {
+  drawScene(tft);
+  drawButtons(tft);
+  drawMeters(tft, pet.hunger(), pet.thirst(), pet.fun(), pet.hygiene());
+  drawPoops(tft, pet.poopCount());
+  pushGiraffe();
+  lastStats[0] = pet.hunger(); lastStats[1] = pet.thirst();
+  lastStats[2] = pet.fun();    lastStats[3] = pet.hygiene();
+  lastPoop = pet.poopCount();
+}
+
+// --- day/night cycle ---
+static bool     s_timeSynced = false;
+static int      s_lastYday   = -1;
+static int      s_riseMin    = 6 * 60, s_setMin = 18 * 60;
+static SkyPhase s_dayPhase   = PHASE_DAY;
+
+// One-shot clock set: join WiFi (~10s cap), NTP-sync with the POSIX TZ, then
+// drop WiFi — the ESP32 RTC keeps time after. Non-fatal; offline → daytime.
+static void syncTime() {
+  Serial.printf("[daynight] connecting to WiFi '%s' ...\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PW);
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) delay(200);
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("[daynight] WiFi connected (%s), syncing NTP ...\n",
+                  WiFi.localIP().toString().c_str());
+    configTzTime(TZ, "pool.ntp.org", "time.nist.gov");
+    struct tm ti;
+    s_timeSynced = getLocalTime(&ti, 8000);
+    if (s_timeSynced)
+      Serial.printf("[daynight] time = %04d-%02d-%02d %02d:%02d:%02d local\n",
+                    ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
+                    ti.tm_hour, ti.tm_min, ti.tm_sec);
+  } else {
+    Serial.println("[daynight] WiFi connect FAILED");
+  }
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  if (!s_timeSynced) Serial.println("[daynight] time sync failed — staying in daytime");
+}
+
+// UTC offset in minutes (DST included), derived by diffing local vs GMT for
+// the current instant — this core's struct tm has no tm_gmtoff.
+static int tzOffsetMinutes() {
+  time_t now = time(nullptr);
+  struct tm lt, gt;
+  localtime_r(&now, &lt);
+  gmtime_r(&now, &gt);
+  int dayDiff = (lt.tm_year != gt.tm_year) ? (lt.tm_year > gt.tm_year ? 1 : -1)
+                                           : (lt.tm_yday - gt.tm_yday);
+  return dayDiff * 1440 + (lt.tm_hour * 60 + lt.tm_min) - (gt.tm_hour * 60 + gt.tm_min);
+}
+
+// Recompute the phase from the clock; on a change swap the palette + repaint.
+// force=true applies the phase WITHOUT repainting (used once during setup,
+// before the first drawScene).
+static const char* PHASE_NAME[8] = {
+  "NIGHT", "DAWN", "SUNRISE", "MORNING", "DAY", "AFTERNOON", "SUNSET", "DUSK"};
+
+static void updateDayNight(bool force) {
+  if (!s_timeSynced) {
+    if (force) { setSkyPhase(PHASE_DAY); setCelestial(288, 52, true); }
+    return;
+  }
+  struct tm ti;
+  if (!getLocalTime(&ti, 50)) return;
+  if (ti.tm_yday != s_lastYday) {            // new day → recompute sun times
+    solarTimes(ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday,
+               LAT, LON, tzOffsetMinutes(), s_riseMin, s_setMin);
+    s_lastYday = ti.tm_yday;
+  }
+  const int nowMin = ti.tm_hour * 60 + ti.tm_min;
+
+  // Night sleep window: ~30 min after sunset until sunrise (wraps midnight).
+  const int nightStart = (s_setMin + 30) % 1440;
+  const bool isNight = (nightStart < s_riseMin)
+                         ? (nowMin >= nightStart && nowMin < s_riseMin)
+                         : (nowMin >= nightStart || nowMin < s_riseMin);
+  pet.setNight(isNight);
+
+  // Move the sun/moon every tick (cheap; the scenery layer redraws it).
+  int cx, cy; bool isSun;
+  celestialPos(nowMin, s_riseMin, s_setMin, cx, cy, isSun);
+  setCelestial(cx, cy, isSun);
+
+  // Swap the sky colours only when the phase actually changes (full repaint).
+  const SkyPhase p = skyPhaseFor(nowMin, s_riseMin, s_setMin);
+  if (force || p != s_dayPhase) {
+    Serial.printf("[daynight] now=%02d:%02d  sunrise=%02d:%02d sunset=%02d:%02d  phase=%s\n",
+                  ti.tm_hour, ti.tm_min, s_riseMin / 60, s_riseMin % 60,
+                  s_setMin / 60, s_setMin % 60, PHASE_NAME[p]);
+    s_dayPhase = p;
+    setSkyPhase(p);
+    if (!force) repaintScene();
+  }
 }
 
 // Alternate happy faces cycled on a timer so the idle face isn't static. Loading
@@ -367,11 +494,17 @@ void setup() {
   tft.setRotation(1);            // landscape 320x240
   tft.setSwapBytes(true);        // RGB565 byte order for pushImage (PNG decode)
 
+  giraffeBuf = (uint16_t*)malloc(GIRAFFE_W * GIRAFFE_H * sizeof(uint16_t));
+  if (!giraffeBuf) Serial.println("giraffeBuf malloc failed — giraffe won't render");
+
   // Off-screen sky-band compositor (~25 KB). The giraffe is composited into it by
   // hand (see composeSkyBand), so no swapBytes setting is needed on the sprite.
   skyBand.setColorDepth(16);
   bandOk = (skyBand.createSprite(GIRAFFE_W, BAND_H) != nullptr);
   if (!bandOk) Serial.println("skyBand createSprite failed — clouds will clip at giraffe edge");
+
+  syncTime();             // one-shot NTP clock set (non-fatal)
+  updateDayNight(true);   // pick the starting phase before the first paint
 
   drawScene(tft);
 
@@ -408,6 +541,30 @@ void loop() {
   pet.update(now - lastTick);
   lastTick = now;
   uiSetPhase(now);   // advance the breeze for the grass sway
+
+#if DAYNIGHT_DEMO
+  // TEMP: fast-forward a simulated 24h so the arc + all 8 colours sweep by.
+  static uint32_t nextDemo = 0; static int demoMin = 5 * 60;
+  if (now >= nextDemo) {
+    nextDemo = now + DAYNIGHT_DEMO_MS;
+    demoMin = (demoMin + 15) % 1440;                 // +15 sim-minutes per step
+    const int R = 6 * 60 + 33, S = 20 * 60 + 37;     // Buda-ish rise/set for demo
+    int cx, cy; bool isSun;
+    celestialPos(demoMin, R, S, cx, cy, isSun);
+    setCelestial(cx, cy, isSun);
+    const SkyPhase p = skyPhaseFor(demoMin, R, S);
+    if (p != s_dayPhase) {
+      Serial.printf("[daynight] DEMO %02d:%02d phase=%s\n", demoMin / 60, demoMin % 60, PHASE_NAME[p]);
+      s_dayPhase = p;
+      setSkyPhase(p);
+      repaintScene();
+    }
+  }
+#else
+  // Day/night: cheap to check, only repaints on an actual phase change.
+  static uint32_t nextDayNight = 0;
+  if (now >= nextDayNight) { nextDayNight = now + 60000; updateDayNight(false); }
+#endif
 
   // Edge-triggered feed: one feed per press, not while held.
   const bool down = ts.touched();

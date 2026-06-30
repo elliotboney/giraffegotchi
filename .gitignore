@@ -9,3 +9,8 @@ docs/other_giraffes/
 .claude/
 _bmad/
 _bmad-output/
+
+
+
+.env
+.env.local

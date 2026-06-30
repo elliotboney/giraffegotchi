@@ -53,10 +53,10 @@ void test_fun_decay_tick(void) {
   TEST_ASSERT_EQUAL_UINT8(79, p.fun());
 }
 
-void test_hygiene_decay_tick(void) {
+void test_hygiene_not_timed(void) {
   Pet p(100, 100, 100, 80);
-  p.update(Pet::DECAY_INTERVAL_MS);   // under one poop interval, so no poop hit
-  TEST_ASSERT_EQUAL_UINT8(79, p.hygiene());
+  p.update(Pet::DECAY_INTERVAL_MS);   // hygiene is not on the decay timer, only poop
+  TEST_ASSERT_EQUAL_UINT8(80, p.hygiene());
 }
 
 void test_all_stats_decay_together(void) {
@@ -65,7 +65,7 @@ void test_all_stats_decay_together(void) {
   TEST_ASSERT_EQUAL_UINT8(49, p.hunger());
   TEST_ASSERT_EQUAL_UINT8(49, p.thirst());
   TEST_ASSERT_EQUAL_UINT8(49, p.fun());
-  TEST_ASSERT_EQUAL_UINT8(49, p.hygiene());
+  TEST_ASSERT_EQUAL_UINT8(50, p.hygiene());  // hygiene exempt from timed decay
 }
 
 void test_drink(void) {
@@ -107,9 +107,8 @@ void test_poop_count_caps(void) {
 
 void test_poop_spawn_drops_hygiene(void) {
   Pet p;                                  // start hygiene 100
-  p.update(Pet::POOP_INTERVAL_MS);        // 1 poop + decay over the interval
-  const uint8_t decaySteps = Pet::POOP_INTERVAL_MS / Pet::DECAY_INTERVAL_MS;
-  TEST_ASSERT_EQUAL_UINT8(100 - decaySteps - Pet::POOP_SPAWN_PENALTY, p.hygiene());
+  p.update(Pet::POOP_INTERVAL_MS);        // 1 poop; hygiene drops only by the poop penalty
+  TEST_ASSERT_EQUAL_UINT8(100 - Pet::POOP_SPAWN_PENALTY, p.hygiene());
 }
 
 void test_clean_removes_all_poop(void) {
@@ -208,6 +207,36 @@ void test_emotion_sick_from_hygiene(void) {
   ASSERT_EMOTION(Emotion::Sick, p);
 }
 
+// ---- night sleep ----
+
+void test_night_sleep_pauses_world(void) {
+  Pet p(50, 50, 50, 50);
+  p.setNight(true);
+  p.update(Pet::NIGHT_WAKE_MS + Pet::DECAY_INTERVAL_MS * 50);  // asleep, lots of time
+  ASSERT_EMOTION(Emotion::Sleepy, p);
+  TEST_ASSERT_EQUAL_UINT8(50, p.hunger());      // decay frozen while asleep
+  TEST_ASSERT_EQUAL_UINT8(50, p.hygiene());
+  TEST_ASSERT_EQUAL_UINT8(0, p.poopCount());    // no poop at night
+}
+
+void test_night_wake_on_action(void) {
+  Pet p(50, 50, 50, 50);
+  p.setNight(true);
+  p.feed();                                     // care action opens the wake window
+  TEST_ASSERT_FALSE(p.nightSleeping());
+  p.update(Pet::DECAY_INTERVAL_MS);             // within the window → normal decay
+  TEST_ASSERT_EQUAL_UINT8(74, p.hunger());      // 50 + 25 feed - 1 decay
+  p.update(Pet::NIGHT_WAKE_MS);                 // window elapses → back to sleep
+  TEST_ASSERT_TRUE(p.nightSleeping());
+}
+
+void test_night_off_is_normal(void) {
+  Pet p(50, 50, 50, 50);                        // nightMode defaults false
+  p.update(Pet::DECAY_INTERVAL_MS);
+  TEST_ASSERT_FALSE(p.nightSleeping());
+  TEST_ASSERT_EQUAL_UINT8(49, p.hunger());      // decays as usual
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_decay_tick);
@@ -217,7 +246,7 @@ int main(int, char**) {
   RUN_TEST(test_decay_clamp_zero);
   RUN_TEST(test_thirst_decay_tick);
   RUN_TEST(test_fun_decay_tick);
-  RUN_TEST(test_hygiene_decay_tick);
+  RUN_TEST(test_hygiene_not_timed);
   RUN_TEST(test_all_stats_decay_together);
   RUN_TEST(test_drink);
   RUN_TEST(test_play);
@@ -242,5 +271,8 @@ int main(int, char**) {
   RUN_TEST(test_emotion_lowest_need_wins);
   RUN_TEST(test_emotion_tie_breaks_by_statid);
   RUN_TEST(test_emotion_sick_from_hygiene);
+  RUN_TEST(test_night_sleep_pauses_world);
+  RUN_TEST(test_night_wake_on_action);
+  RUN_TEST(test_night_off_is_normal);
   return UNITY_END();
 }

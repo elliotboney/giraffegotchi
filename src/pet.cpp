@@ -30,8 +30,13 @@ void Pet::clean() {
 void Pet::read() { sinceRead_ = 0; }
 
 void Pet::update(uint32_t elapsedMs) {
+  // These always advance — they track the wake window and reading/excited state.
   sinceFeed_ = satAdd(sinceFeed_, elapsedMs);
   sinceRead_ = satAdd(sinceRead_, elapsedMs);
+
+  // While sleeping for the night, the world pauses: no poop, no decay, no
+  // sickness — so the owner never wakes to a sick giraffe.
+  if (nightSleeping()) return;
 
   // Poop spawns on its own timer; each appearance knocks Hygiene down once.
   poopAccum_ += elapsedMs;
@@ -44,12 +49,15 @@ void Pet::update(uint32_t elapsedMs) {
     }
   }
 
-  // All four stats decay together on a shared accumulator.
+  // Hunger/Thirst/Fun decay on a shared accumulator. Hygiene is NOT timed —
+  // it only drops from poop, so its meter moves at a similar pace to the rest.
   accum_ += elapsedMs;
   while (accum_ >= DECAY_INTERVAL_MS) {
     accum_ -= DECAY_INTERVAL_MS;
-    for (uint8_t i = 0; i < STAT_COUNT; i++)
+    for (uint8_t i = 0; i < STAT_COUNT; i++) {
+      if (i == int(StatId::Hygiene)) continue;
       stats_[i] = stats_[i] > DECAY_STEP ? (uint8_t)(stats_[i] - DECAY_STEP) : 0;
+    }
   }
 
   // Sick builds while hunger or hygiene is fully empty; resets when neither is.
@@ -58,9 +66,16 @@ void Pet::update(uint32_t elapsedMs) {
   sickTimer_ = (starving || filthy) ? satAdd(sickTimer_, elapsedMs) : 0;
 }
 
+// Asleep for the night = it's the night window AND no care action recently
+// (a feed/drink/play/clean wakes it for NIGHT_WAKE_MS, then it sleeps again).
+bool Pet::nightSleeping() const {
+  return nightMode_ && sinceFeed_ >= NIGHT_WAKE_MS;
+}
+
 Emotion Pet::emotion() const {
   if (sinceRead_ < READING_MS)       return Emotion::Reading;  // user-initiated, top priority
   if (sinceFeed_ < EXCITED_MS)       return Emotion::Excited;
+  if (nightSleeping())               return Emotion::Sleepy;   // night sleep outranks needs/sick
   if (sickTimer_ >= SICK_MS)         return Emotion::Sick;
   if (hunger() < CRITICAL_THRESHOLD) return Emotion::Sad;      // hunger keeps its critical tier
 
