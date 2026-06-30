@@ -605,7 +605,7 @@ void setup() {
   Serial.begin(115200);
 
   tft.init();
-  tft.setRotation(1);            // landscape 320x240
+  tft.setRotation(3);            // landscape 320x240, flipped 180° for the mount
   tft.setSwapBytes(true);        // RGB565 byte order for pushImage (PNG decode)
 
   // Backlight PWM AFTER tft.init() — init() drives TFT_BL in digital mode, which
@@ -726,8 +726,10 @@ void loop() {
       wakeScreen(now);   // any tap restores full brightness
       // NOTE: if the FEED button doesn't respond in landscape on your unit,
       // the touch axes are swapped — map p.y to sx and p.x to sy instead.
-      const int sx = constrain(map(p.x, TS_MINX, TS_MAXX, 0, tft.width()),  0, tft.width()  - 1);
-      const int sy = constrain(map(p.y, TS_MINY, TS_MAXY, 0, tft.height()), 0, tft.height() - 1);
+      int sx = constrain(map(p.x, TS_MINX, TS_MAXX, 0, tft.width()),  0, tft.width()  - 1);
+      int sy = constrain(map(p.y, TS_MINY, TS_MAXY, 0, tft.height()), 0, tft.height() - 1);
+      sx = tft.width()  - 1 - sx;   // touch inverted to match the 180° display flip
+      sy = tft.height() - 1 - sy;
       const bool fast = (now - s_lastTap < FAST_TAP_MS);
       s_lastTap = now;
 
