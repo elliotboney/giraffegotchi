@@ -1,5 +1,9 @@
 #include "species.h"
 
+// Biome prop-draw hook, defined in render (ui.cpp). Declared here (species.h
+// forward-declares TFT_eSPI) so the biome can point to it without pulling in TFT.
+void drawAcaciaTree(TFT_eSPI& tft, int x, int baseY);
+
 // --- Animation data (Story 2.2) — pose names resolve from assetFolder ---
 // Idle rotation: alternate happy faces cycled so the resting face isn't static.
 static const char* GIR_IDLE[]  = {"happy", "happy2", "happy3"};
@@ -48,7 +52,7 @@ static const Biome SAVANNA = {
     /* DUSK      */ {0x5A2F, 0x2947} }, // purple
   SAV_GRASS, 22,
   SAV_STARS, 9,
-  SAV_TREES, 2,
+  SAV_TREES, 2, drawAcaciaTree,
   SAV_FF,    6,
 };
 

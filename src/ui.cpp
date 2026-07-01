@@ -73,7 +73,10 @@ static void drawStars(TFT_eSPI& tft, int x, int y, int w, int h) {
 
 static int treeSway(int) { return 0; }   // sway disabled — trees stand still
 
-static void drawTree(TFT_eSPI& tft, int bx, int by) {
+// The savanna's acacia — the giraffe biome's tree-draw hook (AD-15). Referenced
+// by species/giraffe.cpp SAVANNA.treeDraw. External linkage so the descriptor can
+// point to it.
+void drawAcaciaTree(TFT_eSPI& tft, int bx, int by) {
   const int sw = treeSway(bx);
   tft.fillRect(bx - 2, by - 42, 4, 42, 0x6A40);                 // trunk (still)
   tft.drawLine(bx, by - 40, bx - 9 + sw, by - 48, 0x6A40);      // branches follow canopy
@@ -280,9 +283,9 @@ void animateScenery(TFT_eSPI& tft) {
     if (celDrawnX > -900 && !s_celForce) eraseCelestial(tft, celDrawnX, celDrawnY);
     drawCelestialDirect(tft);
     int cbx, cby, cbw, cbh; celestialBox(s_celX, s_celY, cbx, cby, cbw, cbh);
-    if (bio) for (int i = 0; i < bio->treeN; i++) {   // re-occlude trees the body crossed
+    if (bio && bio->treeDraw) for (int i = 0; i < bio->treeN; i++) {   // re-occlude trees the body crossed
       const TreePos& t = bio->trees[i];
-      if (overlap(cbx, cby, cbw, cbh, t.x - 25, t.baseY - 62, 50, 62)) drawTree(tft, t.x, t.baseY);
+      if (overlap(cbx, cby, cbw, cbh, t.x - 25, t.baseY - 62, 50, 62)) bio->treeDraw(tft, t.x, t.baseY);
     }
     celDrawnX = s_celX; celDrawnY = s_celY;
     s_celForce = false;
@@ -330,9 +333,9 @@ static void drawProps(TFT_eSPI& tft, int x, int y, int w, int h) {
   drawStars(tft, x, y, w, h);
   const Biome* bio = biome();
   if (!bio) return;
-  for (int i = 0; i < bio->treeN; i++) {
+  if (bio->treeDraw) for (int i = 0; i < bio->treeN; i++) {
     const TreePos& t = bio->trees[i];
-    if (overlap(x, y, w, h, t.x - 25, t.baseY - 62, 50, 62)) drawTree(tft, t.x, t.baseY);
+    if (overlap(x, y, w, h, t.x - 25, t.baseY - 62, 50, 62)) bio->treeDraw(tft, t.x, t.baseY);
   }
   for (int i = 0; i < bio->grassN; i++) {
     const Blade& b = bio->grass[i];

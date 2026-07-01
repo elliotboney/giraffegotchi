@@ -71,11 +71,19 @@ struct Star    { int16_t x, y; };                      // night star
 struct TreePos { int16_t x, baseY; };                  // tree trunk base
 struct Firefly { int16_t x, y; };                      // firefly home position (drifts around it)
 
+// Biome-specific prop ART that can't be data (acacia vs pine vs coral) is a named
+// draw hook the biome opts into — the scene invokes it by pointer, like AD-12's
+// capability hooks. The hook draws to a surface; species.h stays hardware-free via
+// this forward declaration (impl lives in render).
+class TFT_eSPI;
+typedef void (*TreeDrawFn)(TFT_eSPI& tft, int x, int baseY);
+
 struct Biome {
   SkyColors palette[8];   // per-phase sky/ground, indexed by SkyPhase (NIGHT..DUSK)
   const Blade*   grass;     uint8_t grassN;
   const Star*    stars;     uint8_t starN;
   const TreePos* trees;     uint8_t treeN;
+  TreeDrawFn     treeDraw;  // how to draw one tree (null => this world has no trees)
   const Firefly* fireflies; uint8_t ffN;
 };
 
