@@ -1,0 +1,14 @@
+{
+  "name": "giraffegotchi",
+  "private": true,
+  "scripts": {
+    "setup": "python3.12 -m venv .venv && .venv/bin/pip install -q --upgrade pip Pillow",
+    "compile": "pio run -e esp32dev",
+    "upload": "pio run -e esp32dev -t upload",
+    "uploadfs": "pio run -e esp32dev -t uploadfs",
+    "flash": "pio run -e esp32dev -t upload -t uploadfs",
+    "native": "pio test -e native",
+    "monitor": "pio device monitor -e esp32dev",
+    "prep": ".venv/bin/python tools/prep_sprite.py"
+  }
+}
