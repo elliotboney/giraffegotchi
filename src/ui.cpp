@@ -121,8 +121,6 @@ static bool s_birdUp[3] = {false, false, false};
 static const int CLOUD_Y[2] = {50, 72};
 static const int BIRD_Y[3]  = {58, 86, 66};
 
-// Giraffe box x-edges (screen coords) — the direct cloud/bird pass clips to these.
-static const int BOX_L = GIRAFFE_X, BOX_R = GIRAFFE_X + GIRAFFE_W;  // 85, 235
 
 static void drawCloud(TFT_eSPI& tft, int x, int y) {
   const int dx[4] = {7, 18, 28, 17}, dy[4] = {4, 3, 4, 7};
@@ -137,13 +135,13 @@ static void drawCloud(TFT_eSPI& tft, int x, int y) {
 // clips the draw to the outside sliver without dropping whole puffs.
 static void drawCloudDirect(TFT_eSPI& tft, int x, int y) {
   const int l = x - 4, r = x + 40;
-  if (r <= BOX_L || l >= BOX_R) { drawCloud(tft, x, y); return; }  // fully outside
-  if (l < BOX_L) {                                                 // straddles left edge
-    tft.setViewport(0, 0, BOX_L, HORIZON_Y, false);
+  if (r <= boxL() || l >= boxR()) { drawCloud(tft, x, y); return; }  // fully outside
+  if (l < boxL()) {                                                 // straddles left edge
+    tft.setViewport(0, 0, boxL(), horizonY(), false);
     drawCloud(tft, x, y);
     tft.resetViewport();
-  } else if (r > BOX_R) {                                          // straddles right edge
-    tft.setViewport(BOX_R, 0, 320 - BOX_R, HORIZON_Y, false);
+  } else if (r > boxR()) {                                          // straddles right edge
+    tft.setViewport(boxR(), 0, 320 - boxR(), horizonY(), false);
     drawCloud(tft, x, y);
     tft.resetViewport();
   }
@@ -153,9 +151,9 @@ static void drawCloudDirect(TFT_eSPI& tft, int x, int y) {
 // Erase the parts of an old cloud that lie OUTSIDE the giraffe box (the in-box
 // part is owned by the band sprite, which recomposites it).
 static void eraseCloud(TFT_eSPI& tft, int x, int y) {
-  const int l0 = x - 4, l1 = min(x + 40, BOX_L);
+  const int l0 = x - 4, l1 = min(x + 40, boxL());
   if (l1 > l0) restoreBg(tft, l0, y - 3, l1 - l0, 16);
-  const int r0 = max(x - 4, BOX_R), r1 = x + 40;
+  const int r0 = max(x - 4, boxR()), r1 = x + 40;
   if (r1 > r0) restoreBg(tft, r0, y - 3, r1 - r0, 16);
 }
 
@@ -166,7 +164,7 @@ static void drawBird(TFT_eSPI& tft, int x, int y, bool up) {
 }
 
 // Draw a blade at its screen position minus (xo,yo) — (0,0) for the panel, or
-// (GIRAFFE_X,GIRAFFE_Y) to draw into the band sprite's local coordinates.
+// (spriteX(),spriteY()) to draw into the band sprite's local coordinates.
 static void drawBlade(TFT_eSPI& tft, const Blade& b, int xo = 0, int yo = 0) {
   // tip bends by the breeze; x-shifted phase makes the blades ripple
   const int dx = (int)(b.amp * sinf((s_phase + b.x * 9) / 360.0f));
@@ -178,8 +176,8 @@ static void drawBlade(TFT_eSPI& tft, const Blade& b, int xo = 0, int yo = 0) {
 
 // True if a cloud or bird currently overlaps the giraffe x-range (so the caller
 // knows to compose+push the sky band this frame).
-static bool cloudInBox(int x)  { return x + 40 > BOX_L && x - 4 < BOX_R; }
-static bool birdInBox(int x)   { return x + 9  > BOX_L && x - 1 < BOX_R; }
+static bool cloudInBox(int x)  { return x + 40 > boxL() && x - 4 < boxR(); }
+static bool birdInBox(int x)   { return x + 9  > boxL() && x - 1 < boxR(); }
 
 bool cloudOrBirdInBox() {
   for (int i = 0; i < 2; i++) if (s_cloudX[i] > -60  && cloudInBox(s_cloudX[i])) return true;
@@ -192,13 +190,13 @@ bool cloudOrBirdInBox() {
 static void drawCelestialDirect(TFT_eSPI& tft) {
   int x, y, w, h; celestialBox(s_celX, s_celY, x, y, w, h);
   const int l = x, r = x + w;
-  if (r <= BOX_L || l >= BOX_R) { drawCelestialAt(tft, s_celX, s_celY); return; }  // fully open
-  if (l < BOX_L) {
-    tft.setViewport(0, 0, BOX_L, HORIZON_Y, false);
+  if (r <= boxL() || l >= boxR()) { drawCelestialAt(tft, s_celX, s_celY); return; }  // fully open
+  if (l < boxL()) {
+    tft.setViewport(0, 0, boxL(), horizonY(), false);
     drawCelestialAt(tft, s_celX, s_celY);
     tft.resetViewport();
-  } else if (r > BOX_R) {
-    tft.setViewport(BOX_R, 0, 320 - BOX_R, HORIZON_Y, false);
+  } else if (r > boxR()) {
+    tft.setViewport(boxR(), 0, 320 - boxR(), horizonY(), false);
     drawCelestialAt(tft, s_celX, s_celY);
     tft.resetViewport();
   }
@@ -209,9 +207,9 @@ static void drawCelestialDirect(TFT_eSPI& tft) {
 // owned by the band, which recomposites each frame).
 static void eraseCelestial(TFT_eSPI& tft, int cx, int cy) {
   int x, y, w, h; celestialBox(cx, cy, x, y, w, h);
-  const int l1 = min(x + w, (int)BOX_L);
+  const int l1 = min(x + w, (int)boxL());
   if (l1 > x) restoreBg(tft, x, y, l1 - x, h);
-  const int r0 = max(x, (int)BOX_R);
+  const int r0 = max(x, (int)boxR());
   if (x + w > r0) restoreBg(tft, r0, y, x + w - r0, h);
 }
 
@@ -226,7 +224,7 @@ static int  s_ffY[FF_N]    = {0};
 static bool s_ffShown[FF_N] = {false};
 static int  s_flutterX = -999, s_flutterY = 0;   // wandering daytime butterfly
 
-static bool flutterInBox(int x) { return x + 8 > BOX_L && x - 8 < BOX_R; }
+static bool flutterInBox(int x) { return x + 8 > boxL() && x - 8 < boxR(); }
 
 static void animateCritters(TFT_eSPI& tft) {
   const bool night = (s_phaseId == PHASE_DUSK || s_phaseId == PHASE_NIGHT);
@@ -311,7 +309,7 @@ void animateScenery(TFT_eSPI& tft) {
 }
 
 // Composite the sky band off-screen: sky fill, then all clouds/birds (sprite
-// auto-clips to its bounds), then the top BAND_H giraffe rows overlaid with the
+// auto-clips to its bounds), then the top bandH() giraffe rows overlaid with the
 // magenta key skipped so the giraffe occludes whatever is behind its silhouette.
 //
 // TFT_eSprite::pushImage has NO transparent-colour overload, so we composite the
@@ -320,21 +318,21 @@ void animateScenery(TFT_eSPI& tft) {
 // same order fillSprite/drawCloud use) — matching gbuf's little-endian PNG bytes.
 void composeSkyBand(TFT_eSprite& band, uint16_t* gbuf) {
   // sky above the horizon, golden ground below (horizon in band-local rows)
-  const int horizonRow = HORIZON_Y - GIRAFFE_Y;
-  band.fillRect(0, 0, GIRAFFE_W, horizonRow, SKY_COLOR);
-  band.fillRect(0, horizonRow, GIRAFFE_W, BAND_H - horizonRow, GROUND_COLOR);
+  const int horizonRow = horizonY() - spriteY();
+  band.fillRect(0, 0, spriteW(), horizonRow, SKY_COLOR);
+  band.fillRect(0, horizonRow, spriteW(), bandH() - horizonRow, GROUND_COLOR);
 
   for (int i = 0; i < 2; i++)
-    drawCloud(band, s_cloudX[i] - GIRAFFE_X, CLOUD_Y[i] - GIRAFFE_Y);
+    drawCloud(band, s_cloudX[i] - spriteX(), CLOUD_Y[i] - spriteY());
   for (int i = 0; i < 3; i++)
-    drawBird(band, s_birdX[i] - GIRAFFE_X, BIRD_Y[i] - GIRAFFE_Y, s_birdUp[i]);
+    drawBird(band, s_birdX[i] - spriteX(), BIRD_Y[i] - spriteY(), s_birdUp[i]);
   // Sun/moon behind the giraffe (band auto-clips to its bounds); the giraffe
   // overlay below then occludes whatever the silhouette covers.
-  drawCelestialAt(band, s_celX - GIRAFFE_X, s_celY - GIRAFFE_Y);
+  drawCelestialAt(band, s_celX - spriteX(), s_celY - spriteY());
 
   uint16_t* dst = (uint16_t*)band.getPointer();
   const uint16_t key = gbuf[0];
-  const int n = GIRAFFE_W * BAND_H;
+  const int n = spriteW() * bandH();
   for (int i = 0; i < n; i++) {
     const uint16_t p = gbuf[i];
     if (p != key) dst[i] = (uint16_t)((p << 8) | (p >> 8));
@@ -357,40 +355,44 @@ static void drawProps(TFT_eSPI& tft, int x, int y, int w, int h) {
 }
 
 void drawScene(TFT_eSPI& tft) {
-  tft.fillRect(0, 0, 320, HORIZON_Y, SKY_COLOR);
-  tft.fillRect(0, HORIZON_Y, 320, 240 - HORIZON_Y, GROUND_COLOR);
+  tft.fillRect(0, 0, 320, horizonY(), SKY_COLOR);
+  tft.fillRect(0, horizonY(), 320, 240 - horizonY(), GROUND_COLOR);
   drawProps(tft, 0, 0, 320, 240);
 }
 
 void restoreBg(TFT_eSPI& tft, int x, int y, int w, int h) {
-  if (y >= HORIZON_Y) {
+  if (y >= horizonY()) {
     tft.fillRect(x, y, w, h, GROUND_COLOR);
-  } else if (y + h <= HORIZON_Y) {
+  } else if (y + h <= horizonY()) {
     tft.fillRect(x, y, w, h, SKY_COLOR);
   } else {                                  // straddles the horizon
-    tft.fillRect(x, y, w, HORIZON_Y - y, SKY_COLOR);
-    tft.fillRect(x, HORIZON_Y, w, (y + h) - HORIZON_Y, GROUND_COLOR);
+    tft.fillRect(x, y, w, horizonY() - y, SKY_COLOR);
+    tft.fillRect(x, horizonY(), w, (y + h) - horizonY(), GROUND_COLOR);
   }
   drawProps(tft, x, y, w, h);
 }
 
-// Image placement aliases (geometry is declared in ui.h so main.cpp can use it).
-static const int IMG_W = GIRAFFE_W, IMG_H = GIRAFFE_H;
-static const int IMG_X = GIRAFFE_X, IMG_Y = GIRAFFE_Y;
+// Geometry now comes from the active descriptor (ui.h accessors) — no compile-
+// time giraffe constants remain.
 
 // PNGdec uses a C-style draw callback that can't capture, so targets are
-// file-static. If g_buf is set, decode writes into that IMG_W*IMG_H buffer;
-// otherwise it pushes straight to g_tft at the on-screen offset.
+// file-static. If g_buf is set, decode writes into that spriteW()*spriteH() buffer;
+// otherwise it pushes straight to g_tft at the on-screen offset. g_bufW is the
+// active-width row stride, set per-decode by the render*ToBuffer entry points.
 static PNG png;
 static TFT_eSPI* g_tft = nullptr;
 static uint16_t* g_buf = nullptr;
-static int g_bufW = IMG_W;     // row stride for g_buf (sprites can be narrower than the giraffe)
+static int g_bufW = 0;             // row stride for g_buf; set before each buffered decode
+
+// Max scratch-row width: the panel is 320 wide, so no on-screen sprite row can
+// exceed it. Not a giraffe geometry constant — a global upper bound.
+static const int MAX_SPRITE_W = 320;
 
 static int pngDraw(PNGDRAW* pDraw) {
-  uint16_t line[IMG_W];        // IMG_W is the widest sprite (the giraffe)
+  uint16_t line[MAX_SPRITE_W];
   png.getLineAsRGB565(pDraw, line, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
   if (g_buf) memcpy(&g_buf[pDraw->y * g_bufW], line, pDraw->iWidth * sizeof(uint16_t));
-  else       g_tft->pushImage(IMG_X, IMG_Y + pDraw->y, pDraw->iWidth, 1, line);
+  else       g_tft->pushImage(spriteX(), spriteY() + pDraw->y, pDraw->iWidth, 1, line);
   return 1;  // continue decoding
 }
 
@@ -453,16 +455,16 @@ void drawGiraffe(TFT_eSPI& tft, Emotion emotion) {
   if (decodeGiraffe(emotion)) return;
 
   // Fallback if the asset is missing/unreadable — visible, not a blank screen.
-  restoreBg(tft, IMG_X, IMG_Y, IMG_W, IMG_H);
+  restoreBg(tft, spriteX(), spriteY(), spriteW(), spriteH());
   tft.setTextColor(TFT_RED, BG_COLOR);
   tft.setTextDatum(MC_DATUM);
-  tft.drawString("giraffe png missing", IMG_X + IMG_W / 2, IMG_Y + IMG_H / 2, 2);
+  tft.drawString("giraffe png missing", spriteX() + spriteW() / 2, spriteY() + spriteH() / 2, 2);
 }
 
-// Decode the emotion into a caller-provided IMG_W*IMG_H buffer (same pixel
+// Decode the emotion into a caller-provided spriteW()*spriteH() buffer (same pixel
 // data as the on-screen draw). Returns false if the asset can't be read.
 bool renderGiraffeToBuffer(uint16_t* dst, Emotion emotion) {
-  g_buf = dst; g_bufW = IMG_W;
+  g_buf = dst; g_bufW = spriteW();
   const bool ok = decodeGiraffe(emotion);
   g_buf = nullptr;
   return ok;
@@ -471,9 +473,10 @@ bool renderGiraffeToBuffer(uint16_t* dst, Emotion emotion) {
 // Decode an arbitrary sprite PNG (by path) into a w-wide buffer — used for frames
 // that aren't pet emotions (alternate happy faces, kick poses, the beach ball).
 bool renderSpriteToBuffer(uint16_t* dst, const char* path, int w) {
+  if (w < 0) w = spriteW();     // default: the active species' width
   g_buf = dst; g_bufW = w;
   const bool ok = decodePng(path);
-  g_buf = nullptr; g_bufW = IMG_W;
+  g_buf = nullptr;
   return ok;
 }
 

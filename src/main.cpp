@@ -88,7 +88,7 @@ EatAnim eat;
 // is used as the transparent colour so background pixels are skipped, letting
 // the scene and any clouds/birds drawn before this call show through.
 static void pushGiraffe() {
-  tft.pushImage(GIRAFFE_X, GIRAFFE_Y, GIRAFFE_W, GIRAFFE_H, giraffeBuf, giraffeBuf[0]);
+  tft.pushImage(spriteX(), spriteY(), spriteW(), spriteH(), giraffeBuf, giraffeBuf[0]);
 }
 
 // Refresh the persistent buffer for the given emotion and push to screen.
@@ -97,7 +97,7 @@ static void pushGiraffe() {
 // transparent push can only overwrite the solid body, never erase it.
 static void updateGiraffe(Emotion e) {
   renderGiraffeToBuffer(giraffeBuf, e);
-  restoreBg(tft, GIRAFFE_X, GIRAFFE_Y, GIRAFFE_W, GIRAFFE_H);
+  restoreBg(tft, spriteX(), spriteY(), spriteW(), spriteH());
   pushGiraffe();
   lastEmotion = e;
 }
@@ -247,7 +247,7 @@ static void startEat(uint32_t now, int kind) {
 }
 
 // Draw the current eat item (apple shrinking / glass draining) into `c` at the
-// offset (ox,oy) — (0,0) for the screen, (GIRAFFE_X,GIRAFFE_Y) for the band sprite.
+// offset (ox,oy) — (0,0) for the screen, (spriteX(),spriteY()) for the band sprite.
 static void drawEatItem(TFT_eSPI& c, int ox, int oy, uint32_t t) {
   const bool dropping = t < EAT_DROP_MS;
   int y = MOUTH_Y;
@@ -323,17 +323,17 @@ static void drawDreamShape(TFT_eSPI& c, int x, int y) {
 }
 // In-box part -> band (local coords; the sprite auto-clips to its bounds).
 static void drawDaydreamBand(TFT_eSprite& band) {
-  drawDreamShape(band, DREAM_CX - GIRAFFE_X, DREAM_CY - GIRAFFE_Y);
+  drawDreamShape(band, DREAM_CX - spriteX(), DREAM_CY - spriteY());
 }
 // Open-sky part -> panel, viewport-clipped to OUTSIDE the giraffe box.
 static void drawDaydreamDirect(TFT_eSPI& c) {
-  const int boxR = GIRAFFE_X + GIRAFFE_W;
-  c.setViewport(boxR, 0, 320 - boxR, HORIZON_Y, false);
+  const int boxR = spriteX() + spriteW();
+  c.setViewport(boxR, 0, 320 - boxR, horizonY(), false);
   drawDreamShape(c, DREAM_CX, DREAM_CY);
   c.resetViewport();
 }
 static void eraseDaydream(TFT_eSPI& c) {               // only the open-sky part persists
-  const int boxR = GIRAFFE_X + GIRAFFE_W;
+  const int boxR = spriteX() + spriteW();
   restoreBg(c, boxR, DREAM_CY - 16, 320 - boxR, 52);
 }
 
@@ -343,8 +343,8 @@ static void drawSleepZ(TFT_eSPI& c, uint32_t now) {
   for (int i = 0; i < SLEEP_ZS; i++) {
     const uint32_t ph = (now - slp.start + (uint32_t)i * (SLEEP_CYCLE_MS / SLEEP_ZS)) % SLEEP_CYCLE_MS;
     const float p = (float)ph / SLEEP_CYCLE_MS;
-    const int x = SLEEP_X0 + (int)((SLEEP_X1 - SLEEP_X0) * p) - GIRAFFE_X;
-    const int y = SLEEP_Y0 + (int)((SLEEP_Y1 - SLEEP_Y0) * p) - GIRAFFE_Y;
+    const int x = SLEEP_X0 + (int)((SLEEP_X1 - SLEEP_X0) * p) - spriteX();
+    const int y = SLEEP_Y0 + (int)((SLEEP_Y1 - SLEEP_Y0) * p) - spriteY();
     const int s = 1 + (int)(p * 2.0f);          // grows 1 -> 3 as it rises
     c.setTextSize(s);
     c.setCursor(x, y);
@@ -384,8 +384,8 @@ static void startPlay(uint32_t now) {
 // Butterfly: a figure-8 flutter around the head, composited into the band.
 static void drawPlayButterfly(TFT_eSPI& band, uint32_t t) {
   const float ph = (float)t / PLAY_MS[PLAY_BUTTERFLY] * 6.2832f;   // one loop
-  const int x = 160 + (int)(42.0f * sinf(ph))         - GIRAFFE_X;
-  const int y = 80  + (int)(26.0f * sinf(ph * 2.0f))  - GIRAFFE_Y; // figure-8
+  const int x = 160 + (int)(42.0f * sinf(ph))         - spriteX();
+  const int y = 80  + (int)(26.0f * sinf(ph * 2.0f))  - spriteY(); // figure-8
   drawButterfly(band, x, y, ((t / 110) & 1));
 }
 
@@ -396,8 +396,8 @@ static void drawPlayBubbles(TFT_eSPI& band, uint32_t t) {
     if (bt < 0) continue;
     const float life = (float)bt / 1500.0f;
     if (life >= 1.0f) continue;                       // popped / gone
-    const int x = 160 + (int)(9.0f * sinf(bt / 180.0f + i)) - GIRAFFE_X;
-    const int y = 101 - (int)(54.0f * life)                 - GIRAFFE_Y;
+    const int x = 160 + (int)(9.0f * sinf(bt / 180.0f + i)) - spriteX();
+    const int y = 101 - (int)(54.0f * life)                 - spriteY();
     if (life > 0.82f) drawSparkle(band, x, y, 3, TFT_WHITE); // pop
     else              drawBubble(band, x, y, 3 + (i & 1));
   }
@@ -476,7 +476,7 @@ static void kickBallPos(uint32_t t, uint32_t T, int& bx, int& by) {
 static void eraseKickBall() {
   if (play_.bx <= -900) return;
   const int r = KICK_BALL_R, top = play_.by - r, h = 2 * r + 1;
-  const int lo = GIRAFFE_X, ro = GIRAFFE_X + GIRAFFE_W;
+  const int lo = spriteX(), ro = spriteX() + spriteW();
   const int l = play_.bx - r, rr = play_.bx + r + 1;
   if (l < lo)  restoreBg(tft, l, top, min(rr, lo) - l, h);
   if (rr > ro) { const int r0 = max(l, ro); restoreBg(tft, r0, top, rr - r0, h); }
@@ -491,7 +491,7 @@ static int kickBallAngle(int bx) { return (bx - 305) * 3; }
 // band sprite clips it to the giraffe footprint.
 static void drawBallBand(int cx, int cy, int angle) {
   if (!ballOk) return;
-  skyBand.setPivot(cx - GIRAFFE_X, cy - GIRAFFE_Y);
+  skyBand.setPivot(cx - spriteX(), cy - spriteY());
   ballSpr.pushRotated(&skyBand, angle, BALL_KEY);
 }
 
@@ -499,7 +499,7 @@ static void drawBallBand(int cx, int cy, int angle) {
 // pushes the sprite's native bytes raw, so swapBytes is turned off around it.
 static void drawBallDirect(int cx, int cy, int angle) {
   if (!ballOk) return;
-  const int lo = GIRAFFE_X, ro = GIRAFFE_X + GIRAFFE_W;
+  const int lo = spriteX(), ro = spriteX() + spriteW();
   const bool sw = tft.getSwapBytes();
   tft.setSwapBytes(false);
   if (cx - KICK_BALL_R < lo) {
@@ -594,13 +594,13 @@ void setup() {
   ledcAttachPin(TFT_BL, BL_CH);
   backlight(BL_FULL);
 
-  giraffeBuf = (uint16_t*)malloc(GIRAFFE_W * GIRAFFE_H * sizeof(uint16_t));
+  giraffeBuf = (uint16_t*)malloc(spriteW() * spriteH() * sizeof(uint16_t));
   if (!giraffeBuf) Serial.println("giraffeBuf malloc failed — giraffe won't render");
 
   // Off-screen sky-band compositor (~25 KB). The giraffe is composited into it by
   // hand (see composeSkyBand), so no swapBytes setting is needed on the sprite.
   skyBand.setColorDepth(16);
-  bandOk = (skyBand.createSprite(GIRAFFE_W, BAND_H) != nullptr);
+  bandOk = (skyBand.createSprite(spriteW(), bandH()) != nullptr);
   if (!bandOk) Serial.println("skyBand createSprite failed — clouds will clip at giraffe edge");
 
   syncTime();             // one-shot NTP clock set (non-fatal)
@@ -821,7 +821,7 @@ void loop() {
   const bool showDream = dream.active && !eat.active && !play_.active && !cln.active && !slp.active;
   if (bandOk) {
     composeSkyBand(skyBand, giraffeBuf);
-    if (eat.active) drawEatItem(skyBand, GIRAFFE_X, GIRAFFE_Y, now - eat.start);
+    if (eat.active) drawEatItem(skyBand, spriteX(), spriteY(), now - eat.start);
     if (slp.active) drawSleepZ(skyBand, now);
     if (showDream)  drawDaydreamBand(skyBand);   // in-box part, atomic with the push
     if (play_.active && play_.kind == PLAY_BUTTERFLY) drawPlayButterfly(skyBand, now - play_.start);
@@ -829,10 +829,10 @@ void loop() {
     if (play_.active && play_.kind == PLAY_KICK) {    // in-box ball part -> band (clips)
       int bx, by;
       kickBallPos(now - play_.start, PLAY_MS[PLAY_KICK], bx, by);
-      if (bx + KICK_BALL_R > GIRAFFE_X && bx - KICK_BALL_R < GIRAFFE_X + GIRAFFE_W)
+      if (bx + KICK_BALL_R > spriteX() && bx - KICK_BALL_R < spriteX() + spriteW())
         drawBallBand(bx, by, kickBallAngle(bx));
     }
-    skyBand.pushSprite(GIRAFFE_X, GIRAFFE_Y);
+    skyBand.pushSprite(spriteX(), spriteY());
   } else if (eat.active) {
     pushGiraffe();
     drawEatItem(tft, 0, 0, now - eat.start);

@@ -1,7 +1,8 @@
 #pragma once
 #include <TFT_eSPI.h>
 #include "pet.h"
-#include "core/sky.h"   // SkyPhase enum + pure solar/phase math (native-tested)
+#include "core/sky.h"        // SkyPhase enum + pure solar/phase math (native-tested)
+#include "species/registry.h" // active-species descriptor (geometry accessors below)
 
 // Savanna scene (RGB565). Sky above the horizon, golden ground below. The
 // giraffe sprites use a magenta key for the WHOLE background, so the runtime
@@ -10,7 +11,6 @@
 extern uint16_t SKY_COLOR;
 extern uint16_t GROUND_COLOR;
 #define BG_COLOR     SKY_COLOR
-static const int HORIZON_Y = 165;
 
 // Render-side day/night state (SkyPhase + the pure math live in core/sky.h).
 void setSkyPhase(SkyPhase p);                      // apply the sky/ground colours
@@ -20,16 +20,21 @@ SkyPhase currentSkyPhase();
 // scenery layer to draw (occluded behind the giraffe via the sky band at centre).
 void setCelestial(int cx, int cy, bool isSun);
 
-// Giraffe sprite placement on screen (centered between meters and buttons).
-static const int GIRAFFE_W = 150, GIRAFFE_H = 160;
-static const int GIRAFFE_X = (320 - GIRAFFE_W) / 2;  // 85
-static const int GIRAFFE_Y = 34;                     // y 34..194
-
-// Compositing band: covers the FULL giraffe footprint. Built off-screen each
-// frame (sky+ground+clouds+birds+grass) and the giraffe is overlaid with the
-// magenta key skipped, then pushed atomically so everything behind the giraffe
-// (clouds up top, grass at the feet) is occluded by the silhouette, no flicker.
-static const int BAND_H = GIRAFFE_H;
+// Active-species geometry (AD-11) — read from the descriptor at runtime, so a
+// swap re-sizes placement, buffers and seams together. These replace the old
+// compile-time GIRAFFE_* / HORIZON_Y / BAND_H constants; no giraffe geometry
+// literal remains in code. The band covers the FULL sprite footprint (bandH ==
+// spriteH): built off-screen each frame and pushed atomically so everything
+// behind the silhouette (clouds up top, grass at the feet) is occluded, no
+// flicker. boxL/boxR are the sprite's x-edges (the direct cloud/bird clip).
+inline int spriteW()  { return activeSpecies().geom.w; }
+inline int spriteH()  { return activeSpecies().geom.h; }
+inline int spriteX()  { return activeSpecies().geom.x; }
+inline int spriteY()  { return activeSpecies().geom.y; }
+inline int horizonY() { return activeSpecies().geom.horizonY; }
+inline int bandH()    { return activeSpecies().geom.h; }
+inline int boxL()     { return activeSpecies().geom.x; }
+inline int boxR()     { return activeSpecies().geom.x + activeSpecies().geom.w; }
 
 // Simple axis-aligned rect with a hit-test, used for the touch feed zone.
 struct Rect {
@@ -53,14 +58,14 @@ void uiSetPhase(uint32_t now);      // set the breeze phase before drawing
 void animateScenery(TFT_eSPI& tft); // redraw swaying grass + trees + open-sky clouds/birds (each frame)
 
 // Composite the sky band (sky + in-box clouds/birds + top giraffe rows) into an
-// off-screen sprite. Caller draws any eat item, then pushSprite(GIRAFFE_X, GIRAFFE_Y).
+// off-screen sprite. Caller draws any eat item, then pushSprite(spriteX(), spriteY()).
 void composeSkyBand(TFT_eSprite& band, uint16_t* gbuf);
 bool cloudOrBirdInBox();            // true if a cloud/bird overlaps the giraffe x-range
 
 void drawGiraffe(TFT_eSPI& tft, Emotion emotion);
-bool renderGiraffeToBuffer(uint16_t* dst, Emotion emotion);  // decode into GIRAFFE_W*GIRAFFE_H buffer
-bool renderSpriteToBuffer(uint16_t* dst, const char* path, int w = GIRAFFE_W);  // decode a w-wide sprite PNG by path
-bool renderPoseToBuffer(uint16_t* dst, const char* pose, int w = GIRAFFE_W);    // decode a pose sprite for the active species (folder from descriptor)
+bool renderGiraffeToBuffer(uint16_t* dst, Emotion emotion);  // decode into the active spriteW()*spriteH() buffer
+bool renderSpriteToBuffer(uint16_t* dst, const char* path, int w = -1);  // decode a w-wide sprite PNG by path (w<0 => active width)
+bool renderPoseToBuffer(uint16_t* dst, const char* pose, int w = -1);    // decode a pose sprite for the active species (w<0 => active width)
 
 // Top row of four care meters, and the bottom row of five action buttons.
 void drawMeters(TFT_eSPI& tft, uint8_t hunger, uint8_t thirst, uint8_t fun, uint8_t hygiene);
