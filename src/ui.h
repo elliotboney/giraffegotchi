@@ -1,6 +1,7 @@
 #pragma once
 #include <TFT_eSPI.h>
 #include "pet.h"
+#include "core/sky.h"   // SkyPhase enum + pure solar/phase math (native-tested)
 
 // Savanna scene (RGB565). Sky above the horizon, golden ground below. The
 // giraffe sprites use a magenta key for the WHOLE background, so the runtime
@@ -11,29 +12,13 @@ extern uint16_t GROUND_COLOR;
 #define BG_COLOR     SKY_COLOR
 static const int HORIZON_Y = 165;
 
-// Eight discrete sky-COLOUR phases, warm-cool-warm across the day. The sun/moon
-// position is a SEPARATE continuous arc (setCelestial), not tied to the phase.
-enum SkyPhase {
-  PHASE_NIGHT, PHASE_DAWN, PHASE_SUNRISE, PHASE_MORNING,
-  PHASE_DAY, PHASE_AFTERNOON, PHASE_SUNSET, PHASE_DUSK,
-};
+// Render-side day/night state (SkyPhase + the pure math live in core/sky.h).
 void setSkyPhase(SkyPhase p);                      // apply the sky/ground colours
 SkyPhase currentSkyPhase();
-// Map a local time (minutes from midnight) to a colour phase, using shoulders
-// around sunrise/sunset.
-SkyPhase skyPhaseFor(int nowMin, int sunriseMin, int sunsetMin);
 
-// Celestial body arc. celestialPos computes screen (cx,cy) + sun/moon for a
-// given local time; setCelestial stores it for the scenery layer to draw
-// (occluded behind the giraffe via the sky band when it crosses centre).
-void celestialPos(int nowMin, int sunriseMin, int sunsetMin,
-                  int& cx, int& cy, bool& isSun);
+// setCelestial stores the sun/moon screen position (from celestialPos) for the
+// scenery layer to draw (occluded behind the giraffe via the sky band at centre).
 void setCelestial(int cx, int cy, bool isSun);
-
-// NOAA almanac sunrise/sunset → local minutes from midnight. tzOffsetMin is
-// minutes east of UTC (includes DST). Recompute once per day.
-void solarTimes(int year, int month, int day, float lat, float lon,
-                int tzOffsetMin, int& sunriseMin, int& sunsetMin);
 
 // Giraffe sprite placement on screen (centered between meters and buttons).
 static const int GIRAFFE_W = 150, GIRAFFE_H = 160;
