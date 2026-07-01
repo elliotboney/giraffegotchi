@@ -569,7 +569,7 @@ static void drawPicker() {
     drawPickerIcon(s, r);
     tft.setTextColor(TFT_WHITE);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString(s.name, r.x + r.w / 2, r.y + r.h - 12, s.icon ? 2 : 4);
+    tft.drawString(s.displayName, r.x + r.w / 2, r.y + r.h - 12, s.icon ? 2 : 4);
   }
   const Rect b = pickerTile(speciesCount());
   tft.fillRoundRect(b.x, b.y, b.w, b.h, 8, 0x4208);

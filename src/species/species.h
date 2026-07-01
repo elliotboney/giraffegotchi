@@ -88,7 +88,8 @@ struct Biome {
 };
 
 struct Species {
-  const char* name;         // lowercase display name ("giraffe")
+  const char* name;         // internal id + registry key (findSpecies); lowercase ("giraffe")
+  const char* displayName;  // the pet's given name, shown in the picker ("george")
   const char* assetFolder;  // LittleFS asset root; sprite paths resolve from it + pose name
   SpeciesGeometry geom;
   SpeciesAnchors  anchors;

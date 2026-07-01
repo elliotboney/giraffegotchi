@@ -56,6 +56,7 @@ static const Biome MEADOW = {
 
 extern const Species GROUNDHOG = {   // `extern` for external linkage (const is internal by default)
   "groundhog",
+  "hank",
   "/groundhog",
   /* geom    */ { 150, 150, 85, 44, 165 },   // squat: H 150, sits at y44..194 on the ground
   /* anchors */ { 166, 110, 60, 195, 90, 210, 54, 225, 54 },  // mouth / food-drop / sleep / dream

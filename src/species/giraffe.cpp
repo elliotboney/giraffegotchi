@@ -64,6 +64,7 @@ static const Biome SAVANNA = {
 // stay null until their epics populate them.
 extern const Species GIRAFFE = {   // `extern` for external linkage (const is internal by default)
   "giraffe",
+  "george",
   "/giraffe",
   /* geom    */ { 150, 160, 85, 34, 165 },
   /* anchors */ { 160, 101, 52, 202, 86, 216, 42, 230, 42 },
