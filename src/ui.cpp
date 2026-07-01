@@ -420,10 +420,10 @@ static const char* emotionPose(Emotion emotion) {
 }
 
 // Resolve a sprite path for the ACTIVE species from its asset folder + pose name
-// (AD-11). Flat filenames today ("<folder>_<pose>.png", e.g. "/giraffe_happy.png");
-// Epic 5 migrates to per-species folders. `out` must hold the formatted path.
+// (AD-11/AD-14): "<folder>/<pose>.png", e.g. "/giraffe/happy.png". `out` must
+// hold the formatted path.
 static void poseToPath(char* out, size_t n, const char* pose) {
-  snprintf(out, n, "%s_%s.png", activeSpecies().assetFolder, pose);
+  snprintf(out, n, "%s/%s.png", activeSpecies().assetFolder, pose);
 }
 
 // Decode a PNG at `path` to the currently-selected target (g_tft or g_buf).

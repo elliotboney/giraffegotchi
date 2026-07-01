@@ -1,6 +1,9 @@
 # PlatformIO build artifacts
 .pio/
 
+# Python venv for the art pipeline (tools/prep_sprite.py)
+.venv/
+
 # Local reference art, not for version control
 docs/other_giraffes/
 
@@ -8,8 +11,6 @@ docs/other_giraffes/
 .agents/
 .claude/
 _bmad/
-_bmad-output/
-
 
 
 .env

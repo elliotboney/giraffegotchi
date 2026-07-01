@@ -483,7 +483,7 @@ void setup() {
   if (s_dead) { renderPoseToBuffer(giraffeBuf, "dead"); pushGiraffe(); }
   else        updateGiraffe(pet.emotion());
   uint16_t* tmp = (uint16_t*)malloc(BALL_PX * BALL_PX * sizeof(uint16_t));
-  if (tmp && renderSpriteToBuffer(tmp, "/beach_ball.png", BALL_PX) && ballSpr.createSprite(BALL_PX, BALL_PX)) {
+  if (tmp && renderPoseToBuffer(tmp, "beach_ball", BALL_PX) && ballSpr.createSprite(BALL_PX, BALL_PX)) {
     ballSpr.setSwapBytes(true);
     ballSpr.pushImage(0, 0, BALL_PX, BALL_PX, tmp);   // byte-swaps into the sprite's native order
     ballSpr.setPivot(BALL_PX / 2, BALL_PX / 2);
