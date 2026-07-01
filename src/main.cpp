@@ -498,23 +498,86 @@ static void applySpeciesSwap(int idx) {
 }
 
 // --- animal picker (long-press BOOK) ---
-// Story 4.3 opens a placeholder; Story 4.4 replaces it with the full grid.
+// Full-screen modal grid: one tile per species (icon sprite + lowercase name,
+// current outlined) plus a back tile, on a neutral dark panel (UX-DR2/6).
 static const uint32_t LONG_PRESS_MS = 800;   // BOOK held this long -> open the picker
 static bool     s_pickerOpen = false;
 static uint32_t s_pressStart = 0;            // when the current touch began
 static bool     s_pressBook  = false;        // current press began inside the BOOK rect
 static bool     s_longFired  = false;        // long-press already fired this hold
 
-static void drawPickerPlaceholder() {
-  tft.fillScreen(TFT_NAVY);
+static const uint16_t PK_BG   = 0x2104;      // neutral dark panel
+static const uint16_t PK_TILE = 0x3186;      // tile fill
+static const int PK_COLS   = 3;
+static const int PK_TW = 100, PK_TH = 108, PK_GAP = 4, PK_X0 = 9, PK_Y0 = 42;
+
+// Tile rect for item i (0..speciesCount-1 = species, then the back tile). Targets
+// are 100x108 >= 44px (UX-DR6).
+static Rect pickerTile(int i) {
+  const int col = i % PK_COLS, row = i / PK_COLS;
+  return { (int16_t)(PK_X0 + col * (PK_TW + PK_GAP)), (int16_t)(PK_Y0 + row * (PK_TH + PK_GAP)),
+           (int16_t)PK_TW, (int16_t)PK_TH };
+}
+
+// Draw a species' icon sprite centred in its tile (fallback: nothing, the name
+// stands alone). Decodes <folder>/<icon>.png for that species (not the active one).
+static void drawPickerIcon(const Species& s, const Rect& r) {
+  if (!s.icon) return;
+  static uint16_t icon[64 * 64];
+  char path[48];
+  snprintf(path, sizeof(path), "%s/%s.png", s.assetFolder, s.icon);
+  if (renderSpriteToBuffer(icon, path, 64)) {
+    const bool sw = tft.getSwapBytes();
+    tft.setSwapBytes(true);
+    tft.pushImage(r.x + (r.w - 64) / 2, r.y + 8, 64, 64, icon, icon[0]);
+    tft.setSwapBytes(sw);
+  }
+}
+
+static void drawPicker() {
+  tft.fillScreen(PK_BG);
   tft.setTextColor(TFT_WHITE);
   tft.setTextDatum(MC_DATUM);
-  tft.drawString("picker coming", 160, 108, 4);
-  tft.drawString("tap to close", 160, 140, 2);
+  tft.drawString("choose animal", 160, 22, 4);
+
+  const int active = activeSpeciesIndex();
+  for (int i = 0; i < speciesCount(); i++) {
+    const Rect r = pickerTile(i);
+    const Species& s = speciesAt(i);
+    tft.fillRoundRect(r.x, r.y, r.w, r.h, 8, PK_TILE);
+    if (i == active) {                       // outline the current animal
+      tft.drawRoundRect(r.x, r.y, r.w, r.h, 8, TFT_WHITE);
+      tft.drawRoundRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2, 8, TFT_WHITE);
+    }
+    drawPickerIcon(s, r);
+    tft.setTextColor(TFT_WHITE);
+    tft.setTextDatum(MC_DATUM);
+    tft.drawString(s.name, r.x + r.w / 2, r.y + r.h - 12, s.icon ? 2 : 4);
+  }
+  const Rect b = pickerTile(speciesCount());
+  tft.fillRoundRect(b.x, b.y, b.w, b.h, 8, 0x4208);
+  tft.setTextColor(TFT_WHITE);
+  tft.drawString("back", b.x + b.w / 2, b.y + b.h / 2, 4);
 }
-static void openPicker()  { s_pickerOpen = true; drawPickerPlaceholder(); }
+
+static void openPicker()  { s_pickerOpen = true; drawPicker(); }
 static void closePicker() { s_pickerOpen = false; repaintScene(); }
-static void pickerHandleTap(int /*sx*/, int /*sy*/) { closePicker(); }  // 4.4: grid selection
+
+// A tap inside the open picker: a non-current species commits the swap (via the
+// atomic-swap latch + NVS persist), the current animal or the back tile closes it.
+static void pickerHandleTap(int sx, int sy) {
+  for (int i = 0; i < speciesCount(); i++) {
+    if (!pickerTile(i).contains(sx, sy)) continue;
+    if (i == activeSpeciesIndex()) { closePicker(); return; }   // current -> no change
+    s_pickerOpen = false;
+    tft.fillScreen(PK_BG);                                       // transient swapping... beat (UX-DR4)
+    tft.setTextColor(TFT_WHITE); tft.setTextDatum(MC_DATUM);
+    tft.drawString("swapping...", 160, 120, 4);
+    s_pendingSwap = i;               // atomic swap + persist at the top of next loop (4.1/4.2)
+    return;
+  }
+  if (pickerTile(speciesCount()).contains(sx, sy)) closePicker();  // back
+}
 
 void setup() {
   Serial.begin(115200);
@@ -604,14 +667,16 @@ void loop() {
   // pet.update() and any animation tick (AD-13), so no frame straddles two species.
   if (s_pendingSwap >= 0) { applySpeciesSwap(s_pendingSwap); s_pendingSwap = -1; }
 
-  // Dev-only serial swap trigger (removed/gated in Story 4.4): 's' cycles species,
-  // 'g'/'h' pick giraffe/groundhog.
+#ifdef DEBUG_SWAP
+  // Dev-only serial swap trigger (build with -DDEBUG_SWAP): 's' cycles species,
+  // 'g'/'h' pick giraffe/groundhog. The picker (long-press BOOK) is the shipping path.
   while (Serial.available()) {
     const int c = Serial.read();
     if      (c == 's') s_pendingSwap = (activeSpeciesIndex() + 1) % speciesCount();
     else if (c == 'g') s_pendingSwap = findSpecies("giraffe");
     else if (c == 'h') s_pendingSwap = findSpecies("groundhog");
   }
+#endif
 
   if (!s_dead) pet.update(now - lastTick);   // frozen while dead
   lastTick = now;
