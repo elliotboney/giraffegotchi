@@ -47,6 +47,11 @@ struct AnimSet {
   // foreground specs (eat / sleep-Z / daydream / play) arrive in Story 2.3
 };
 
+// Capability hooks (AD-12 / FR6): signature moves a species opts into. Non-data
+// behaviors (kick physics, kite swoop) run only when the active descriptor
+// declares them, so they never leak into a data-only animal (FR10).
+enum Capability : uint16_t { CAP_NONE = 0, CAP_KITE = 1 << 0, CAP_KICK = 1 << 1 };
+
 // Populated by later epics — forward-declared so the descriptor can carry the
 // fields now (structure only, no behavior). Null until their epic lands.
 struct Biome;      // Epic 3: world palettes / props / critters
@@ -57,6 +62,7 @@ struct Species {
   const char* assetFolder;  // LittleFS asset root; sprite paths resolve from it + pose name
   SpeciesGeometry geom;
   SpeciesAnchors  anchors;
+  uint16_t        caps;     // OR of Capability flags — the signature moves this species has
 
   // --- structure only (later epics populate these; not read yet, AD-11) ---
   const AnimSet*  anims;    // Epic 2

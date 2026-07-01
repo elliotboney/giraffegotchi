@@ -222,11 +222,20 @@ static const int      DREAM_ICONS      = 4;
 DaydreamAnim dream;
 
 // Play animations rotate through a list on each PLAY press. Butterfly & bubbles
-// composite INTO the band (in front of the giraffe); the kite draws directly in
-// the open left sky. A kick/nudge using a new sprite is reserved as a future
-// 4th kind — add it before PLAY_KINDS and extend PLAY_MS / the band dispatch.
+// are universal band effects; the KITE (direct swoop) and KICK (ball physics) are
+// SIGNATURE CAPABILITY HOOKS (AD-12/FR6) — they only cycle + run when the active
+// descriptor declares CAP_KITE / CAP_KICK, so a species without them plays only
+// butterfly/bubbles and none of the giraffe kick/kite code runs (FR10).
 enum PlayKind { PLAY_BUTTERFLY, PLAY_BUBBLES, PLAY_KITE, PLAY_KICK, PLAY_KINDS };
 static const uint32_t PLAY_MS[PLAY_KINDS] = {2200, 2400, 2600, 2400};
+
+// Is this play kind available for the active species? Butterfly/bubbles always;
+// kite/kick are opt-in capability hooks.
+static bool playKindSupported(int kind) {
+  if (kind == PLAY_KITE) return activeSpecies().caps & CAP_KITE;
+  if (kind == PLAY_KICK) return activeSpecies().caps & CAP_KICK;
+  return true;   // butterfly, bubbles — universal
+}
 
 struct PlayAnim {
   bool active = false;
@@ -240,8 +249,11 @@ static int s_playKind = 0;         // advances each press so play varies
 static int s_kickPose = -1;        // which pose is in giraffeBuf (-1 none, 0 normal, 1 kick1, 2 kick2)
 
 static void startPlay(uint32_t now) {
-  play_.kind  = s_playKind;
-  s_playKind  = (s_playKind + 1) % PLAY_KINDS;
+  // Pick the next SUPPORTED kind starting at s_playKind (skips undeclared hooks).
+  int k = s_playKind;
+  for (int i = 0; i < PLAY_KINDS && !playKindSupported(k); i++) k = (k + 1) % PLAY_KINDS;
+  play_.kind  = k;
+  s_playKind  = (k + 1) % PLAY_KINDS;
   play_.active = true;
   play_.start  = now;
   play_.kx = play_.ky = -999;
