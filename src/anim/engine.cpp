@@ -2,6 +2,7 @@
 #include "../ui.h"                 // renderGiraffeToBuffer, TFT_eSprite, draw primitives
 #include "../species/registry.h"   // activeSpecies() — specs + anchors from the descriptor
 #include <math.h>                  // sinf (butterfly / bubbles)
+#include <stdlib.h>                // malloc/free (food-sprite cache)
 
 namespace anim {
 
@@ -77,6 +78,22 @@ static const int      FOOD_R = 13;
 static const uint32_t SLEEP_CYCLE_MS = 2400;
 static const int      SLEEP_ZS = 3;
 
+// Cached decode of the active species' food sprite (decoded once per sprite; the
+// active-species swap in Epic 4 changes food.sprite, re-triggering the decode).
+static uint16_t*  s_foodBuf    = nullptr;
+static const char* s_foodSprite = nullptr;
+
+static void drawFoodSprite(TFT_eSPI& c, const FoodItem& f, int cx, int cy) {
+  if (s_foodSprite != f.sprite) {          // (re)decode on change
+    free(s_foodBuf);
+    s_foodBuf = (uint16_t*)malloc((size_t)f.w * f.h * sizeof(uint16_t));
+    if (s_foodBuf && !renderPoseToBuffer(s_foodBuf, f.sprite, f.w)) { free(s_foodBuf); s_foodBuf = nullptr; }
+    s_foodSprite = f.sprite;
+  }
+  if (!s_foodBuf) return;
+  c.pushImage(cx - f.w / 2, cy - f.h / 2, f.w, f.h, s_foodBuf, s_foodBuf[0]);  // magenta key
+}
+
 void anim::composeEat(TFT_eSPI& c, int ox, int oy, uint32_t t, Consume kind) {
   const SpeciesAnchors& a = activeSpecies().anchors;
   const bool dropping = t < EAT_DROP_MS;
@@ -87,11 +104,17 @@ void anim::composeEat(TFT_eSPI& c, int ox, int oy, uint32_t t, Consume kind) {
   }
   const int step = dropping ? -1 : (int)((t - EAT_DROP_MS) / EAT_BITE_MS);  // 0..EAT_BITES-1
 
-  if (kind == Consume::Water) {        // glass drains in gulps
+  if (kind == Consume::Water) {        // glass drains in gulps (universal, never per-species)
     int fill = dropping ? 100 : 100 - (step + 1) * 100 / EAT_BITES;
     if (fill < 0) fill = 0;
     drawDrink(c, a.mouthX - ox, y - oy, fill);
-  } else {                             // apple shrinks in bites
+    return;
+  }
+
+  const FoodItem* food = activeSpecies().food;
+  if (food) {                          // per-species food sprite at the mouth (FR11)
+    drawFoodSprite(c, *food, a.mouthX - ox, y - oy);
+  } else {                             // default: drawn apple, shrinks in bites
     int r = dropping ? FOOD_R : FOOD_R - step * (FOOD_R / EAT_BITES + 1);
     if (r < 2) r = 2;
     drawFood(c, a.mouthX - ox, y - oy, r);

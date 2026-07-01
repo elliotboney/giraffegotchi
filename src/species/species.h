@@ -52,10 +52,17 @@ struct AnimSet {
 // declares them, so they never leak into a data-only animal (FR10).
 enum Capability : uint16_t { CAP_NONE = 0, CAP_KITE = 1 << 0, CAP_KICK = 1 << 1 };
 
-// Populated by later epics — forward-declared so the descriptor can carry the
-// fields now (structure only, no behavior). Null until their epic lands.
+// Optional per-species food (FR11). When a descriptor supplies one, the eat
+// animation draws this sprite at the mouth anchor; otherwise it falls back to the
+// drawn apple primitive. Drink/water is universal (the glass), never per-species.
+struct FoodItem {
+  const char* sprite;   // pose name in the species folder (decoded like other poses)
+  int w, h;             // sprite dimensions
+};
+
+// Populated by a later epic — forward-declared so the descriptor can carry the
+// field now (structure only, no behavior). Null until Epic 3.
 struct Biome;      // Epic 3: world palettes / props / critters
-struct FoodItem;   // Epic 2/5: optional per-species food (else the drawn apple)
 
 struct Species {
   const char* name;         // lowercase display name ("giraffe")
