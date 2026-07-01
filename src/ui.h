@@ -60,6 +60,7 @@ bool cloudOrBirdInBox();            // true if a cloud/bird overlaps the giraffe
 void drawGiraffe(TFT_eSPI& tft, Emotion emotion);
 bool renderGiraffeToBuffer(uint16_t* dst, Emotion emotion);  // decode into GIRAFFE_W*GIRAFFE_H buffer
 bool renderSpriteToBuffer(uint16_t* dst, const char* path, int w = GIRAFFE_W);  // decode a w-wide sprite PNG by path
+bool renderPoseToBuffer(uint16_t* dst, const char* pose, int w = GIRAFFE_W);    // decode a pose sprite for the active species (folder from descriptor)
 
 // Top row of four care meters, and the bottom row of five action buttons.
 void drawMeters(TFT_eSPI& tft, uint8_t hunger, uint8_t thirst, uint8_t fun, uint8_t hygiene);

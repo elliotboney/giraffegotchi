@@ -6,7 +6,7 @@
 // from assetFolder in Story 1.5 (flat filenames today, e.g. "/giraffe_happy.png";
 // migrates to per-species folders in Epic 5). The anim/biome/food/icon fields
 // stay null until their epics populate them.
-const Species GIRAFFE = {
+extern const Species GIRAFFE = {   // `extern` for external linkage (const is internal by default)
   "giraffe",
   "/giraffe",
   /* geom    */ { 150, 160, 85, 34, 165 },

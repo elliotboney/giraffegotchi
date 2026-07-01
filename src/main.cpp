@@ -211,7 +211,7 @@ static void updateDayNight(bool force) {
 
 // Alternate happy faces cycled on a timer so the idle face isn't static. Loading
 // a new frame into giraffeBuf is enough — the band composites it next push.
-static const char* HAPPY_FRAMES[] = {"/giraffe_happy.png", "/giraffe_happy2.png", "/giraffe_happy3.png"};
+static const char* HAPPY_FRAMES[] = {"happy", "happy2", "happy3"};
 static const int      HAPPY_FRAME_N  = 3;
 static const uint32_t HAPPY_FRAME_MS = 3500;
 static int      s_happyIdx  = 0;
@@ -222,9 +222,9 @@ static uint32_t s_happyNext = 0;
 //   blink:  open -> blink -> blink2(closed) -> blink3(opening) -> open
 //   ears:   perk up -> down -> back
 //   tail:   swish to the left -> back
-static const char* BLINK_FR[] = {"/giraffe_blink.png", "/giraffe_blink2.png", "/giraffe_blink3.png"};
-static const char* EARS_FR[]  = {"/giraffe_ears_up.png", "/giraffe_ears_down.png"};
-static const char* TAIL_FR[]  = {"/giraffe_tail_left.png"};
+static const char* BLINK_FR[] = {"blink", "blink2", "blink3"};
+static const char* EARS_FR[]  = {"ears_up", "ears_down"};
+static const char* TAIL_FR[]  = {"tail_left"};
 struct Tic { const char* const* frames; int n; uint32_t holdMs; };
 static const Tic TICS[] = {
   {BLINK_FR, 3, 90},
@@ -441,8 +441,8 @@ static const uint32_t KICK_LAUNCH    = 1150;           // leg extends / ball lau
 // 2 = kick2 (full extend). Only re-decodes when the pose actually changes.
 static void setKickPose(int pose) {
   if (pose == s_kickPose) return;
-  if      (pose == 2) renderSpriteToBuffer(giraffeBuf, "/giraffe_kick2.png");
-  else if (pose == 1) renderSpriteToBuffer(giraffeBuf, "/giraffe_kick1.png");
+  if      (pose == 2) renderPoseToBuffer(giraffeBuf, "kick2");
+  else if (pose == 1) renderPoseToBuffer(giraffeBuf, "kick1");
   else                renderGiraffeToBuffer(giraffeBuf, pet.emotion());
   s_kickPose = pose;
 }
@@ -620,7 +620,7 @@ void setup() {
   save::restore(pet, s_dead);      // restore care stats from before the power loss
 
   lastEmotion = pet.emotion();
-  if (s_dead) { renderSpriteToBuffer(giraffeBuf, "/giraffe_dead.png"); pushGiraffe(); }
+  if (s_dead) { renderPoseToBuffer(giraffeBuf, "dead"); pushGiraffe(); }
   else        updateGiraffe(lastEmotion);
   uint16_t* tmp = (uint16_t*)malloc(BALL_PX * BALL_PX * sizeof(uint16_t));
   if (tmp && renderSpriteToBuffer(tmp, "/beach_ball.png", BALL_PX) && ballSpr.createSprite(BALL_PX, BALL_PX)) {
@@ -652,7 +652,7 @@ static int      s_tapStreak = 0;
 static void die() {
   s_dead = true; s_tapStreak = 0;
   eat.active = play_.active = cln.active = slp.active = dream.active = false;
-  renderSpriteToBuffer(giraffeBuf, "/giraffe_dead.png");   // band shows it next frame
+  renderPoseToBuffer(giraffeBuf, "dead");   // band shows it next frame
   save::writeNow(pet, s_dead);                             // death survives a power cycle
   Serial.println("[prank] the giraffe has perished — mash the book to revive");
 }
@@ -771,22 +771,22 @@ void loop() {
         if (now >= s_ticStepNext) {
           s_ticIdx++;
           if (s_ticIdx < t.n) {
-            renderSpriteToBuffer(giraffeBuf, t.frames[s_ticIdx]);
+            renderPoseToBuffer(giraffeBuf, t.frames[s_ticIdx]);
             s_ticStepNext = now + t.holdMs;
           } else {                                 // tic done -> current happy face
             s_ticActive = false;
-            renderSpriteToBuffer(giraffeBuf, HAPPY_FRAMES[s_happyIdx]);
+            renderPoseToBuffer(giraffeBuf, HAPPY_FRAMES[s_happyIdx]);
             s_ticNext = now + 3500 + (now % 5000); // 3.5–8.5 s until the next tic
           }
         }
       } else if (now >= s_ticNext) {               // start the next tic (cycles kinds)
         s_ticKind = (s_ticKind + 1) % TIC_N;
         s_ticActive = true; s_ticIdx = 0;
-        renderSpriteToBuffer(giraffeBuf, TICS[s_ticKind].frames[0]);
+        renderPoseToBuffer(giraffeBuf, TICS[s_ticKind].frames[0]);
         s_ticStepNext = now + TICS[s_ticKind].holdMs;
       } else if (now >= s_happyNext) {             // idle face rotation
         s_happyIdx = (s_happyIdx + 1) % HAPPY_FRAME_N;
-        renderSpriteToBuffer(giraffeBuf, HAPPY_FRAMES[s_happyIdx]);
+        renderPoseToBuffer(giraffeBuf, HAPPY_FRAMES[s_happyIdx]);
         s_happyNext = now + HAPPY_FRAME_MS;
       }
     }

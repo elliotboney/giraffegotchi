@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "species/registry.h"
 #include <LittleFS.h>
 #include <PNGdec.h>
 #include <math.h>
@@ -393,20 +394,29 @@ static int pngDraw(PNGDRAW* pDraw) {
   return 1;  // continue decoding
 }
 
-static const char* emotionPath(Emotion emotion) {
+// Pose name for an emotion (no species-specific literal — the folder comes from
+// the active descriptor). Kept in sync with the giraffe's sprite set.
+static const char* emotionPose(Emotion emotion) {
   switch (emotion) {
-    case Emotion::Hungry:  return "/giraffe_hungry.png";
-    case Emotion::Sad:     return "/giraffe_sad.png";
-    case Emotion::Excited: return "/giraffe_excited.png";
-    case Emotion::Sleepy:  return "/giraffe_sleepy.png";
-    case Emotion::Sick:    return "/giraffe_sick.png";
-    case Emotion::Reading: return "/giraffe_reading.png";
-    case Emotion::Thirsty: return "/giraffe_thirsty.png";
-    case Emotion::Bored:   return "/giraffe_bored.png";
-    case Emotion::Dirty:   return "/giraffe_dirty.png";
+    case Emotion::Hungry:  return "hungry";
+    case Emotion::Sad:     return "sad";
+    case Emotion::Excited: return "excited";
+    case Emotion::Sleepy:  return "sleepy";
+    case Emotion::Sick:    return "sick";
+    case Emotion::Reading: return "reading";
+    case Emotion::Thirsty: return "thirsty";
+    case Emotion::Bored:   return "bored";
+    case Emotion::Dirty:   return "dirty";
     case Emotion::Happy:
-    default:               return "/giraffe_happy.png";
+    default:               return "happy";
   }
+}
+
+// Resolve a sprite path for the ACTIVE species from its asset folder + pose name
+// (AD-11). Flat filenames today ("<folder>_<pose>.png", e.g. "/giraffe_happy.png");
+// Epic 5 migrates to per-species folders. `out` must hold the formatted path.
+static void poseToPath(char* out, size_t n, const char* pose) {
+  snprintf(out, n, "%s_%s.png", activeSpecies().assetFolder, pose);
 }
 
 // Decode a PNG at `path` to the currently-selected target (g_tft or g_buf).
@@ -431,7 +441,11 @@ static bool decodePng(const char* path) {
   return ok;
 }
 
-static bool decodeGiraffe(Emotion emotion) { return decodePng(emotionPath(emotion)); }
+static bool decodeGiraffe(Emotion emotion) {
+  char path[48];
+  poseToPath(path, sizeof(path), emotionPose(emotion));
+  return decodePng(path);
+}
 
 void drawGiraffe(TFT_eSPI& tft, Emotion emotion) {
   g_buf = nullptr;
@@ -461,6 +475,15 @@ bool renderSpriteToBuffer(uint16_t* dst, const char* path, int w) {
   const bool ok = decodePng(path);
   g_buf = nullptr; g_bufW = IMG_W;
   return ok;
+}
+
+// Decode a sprite by POSE NAME for the active species (path resolved from the
+// descriptor's asset folder) — the non-emotion frames (happy rotation, idle
+// tics, kick poses, dead) go through here so no path literal lives in main.
+bool renderPoseToBuffer(uint16_t* dst, const char* pose, int w) {
+  char path[48];
+  poseToPath(path, sizeof(path), pose);
+  return renderSpriteToBuffer(dst, path, w);
 }
 
 static void drawMeter(TFT_eSPI& tft, int cellX, uint8_t value, uint16_t color, const char* label) {
