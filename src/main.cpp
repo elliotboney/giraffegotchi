@@ -8,6 +8,7 @@
 #include "pet.h"
 #include "ui.h"
 #include "io/save.h"
+#include "anim/engine.h"
 
 // Injected from .env by tools/load_env.py. Fallbacks keep the build working
 // without a .env (firmware just stays in daytime — no WiFi/time).
@@ -50,7 +51,7 @@ SPIClass touchSPI(VSPI);
 XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 
 Pet pet;
-Emotion lastEmotion;
+anim::Engine engine;   // data-driven animation engine (owns the emotion-base pose floor, AD-5/AD-12)
 
 // Prank-death state (persisted via io/save). Owned here (orchestration); the
 // save module takes it by value/ref — a power cut doesn't age the giraffe.
@@ -96,10 +97,9 @@ static void pushGiraffe() {
 // drop back down) doesn't leave ghost pixels in newly-transparent areas — the
 // transparent push can only overwrite the solid body, never erase it.
 static void updateGiraffe(Emotion e) {
-  renderGiraffeToBuffer(giraffeBuf, e);
+  engine.forcePose(e, giraffeBuf);   // engine owns the emotion-base pose write (decodes into giraffeBuf)
   restoreBg(tft, spriteX(), spriteY(), spriteW(), spriteH());
   pushGiraffe();
-  lastEmotion = e;
 }
 
 // Repaint the scene after an action (play / clean) resets the display.
@@ -241,7 +241,7 @@ static uint32_t s_ticNext     = 5000;          // next tic start time
 static void startEat(uint32_t now, int kind) {
   eat.kind = kind;
   const Emotion e = pet.emotion();     // Excited after feed/drink
-  if (e != lastEmotion) updateGiraffe(e);
+  if (e != engine.emotion()) updateGiraffe(e);
   eat.active = true;
   eat.start = now;
 }
@@ -619,9 +619,9 @@ void setup() {
   save::begin();                   // open NVS
   save::restore(pet, s_dead);      // restore care stats from before the power loss
 
-  lastEmotion = pet.emotion();
+  engine.start(millis());
   if (s_dead) { renderPoseToBuffer(giraffeBuf, "dead"); pushGiraffe(); }
-  else        updateGiraffe(lastEmotion);
+  else        updateGiraffe(pet.emotion());
   uint16_t* tmp = (uint16_t*)malloc(BALL_PX * BALL_PX * sizeof(uint16_t));
   if (tmp && renderSpriteToBuffer(tmp, "/beach_ball.png", BALL_PX) && ballSpr.createSprite(BALL_PX, BALL_PX)) {
     ballSpr.setSwapBytes(true);
@@ -660,7 +660,7 @@ static void die() {
 static void revive() {
   s_dead = false; s_tapStreak = 0;
   pet.load(100, 100, 100, 100, 0);          // back to full
-  updateGiraffe(pet.emotion());             // sets lastEmotion + repaints
+  updateGiraffe(pet.emotion());             // engine repaints the emotion pose
   lastStats[0] = lastStats[1] = lastStats[2] = lastStats[3] = 255;  // force meter redraw
   lastPoop = 255;
   save::writeNow(pet, s_dead);
@@ -755,7 +755,7 @@ void loop() {
     // Redraw the giraffe only when the emotion actually changes (covers both
     // hunger-driven and time-driven transitions, e.g. excited -> happy).
     const Emotion e = pet.emotion();
-    if (e != lastEmotion) {
+    if (e != engine.emotion()) {
       if (slp.active) stopSleep();   // clear Z's before switching sprite
       updateGiraffe(e);              // loads happy.png (frame 0) when entering happy
       drawButtons(tft);

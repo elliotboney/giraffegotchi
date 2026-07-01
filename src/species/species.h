@@ -24,9 +24,29 @@ struct SpeciesAnchors {
   int dreamCx, dreamCy;    // daydream thought-bubble centre
 };
 
+// --- Animation data model (AD-12) — pure data, played by the anim engine ---
+// An animation is data: a variable-length frame list (pose names resolved from
+// assetFolder), a per-frame cadence, a layer tag, and (for foreground anims) the
+// anchor it attaches to. Pose-layer anims write the pose buffer under the AD-5
+// priority; foreground-layer anims compose into the band and never touch it.
+enum class AnimLayer : uint8_t { Pose, Foreground };
+enum class AnchorRef : uint8_t { None, Mouth, SleepZ, Daydream };
+
+struct AnimSpec {
+  const char* const* frames;   // pose names (variable length — never assume 3)
+  uint8_t   n;                 // frame count
+  uint32_t  cadenceMs;         // per-frame advance interval
+  AnimLayer layer;
+  AnchorRef anchor;            // foreground only; Pose anims use None
+};
+
+struct AnimSet {
+  const AnimSpec* specs;       // the species' animations
+  uint8_t n;
+};
+
 // Populated by later epics — forward-declared so the descriptor can carry the
 // fields now (structure only, no behavior). Null until their epic lands.
-struct AnimSet;    // Epic 2: data-driven animation set
 struct Biome;      // Epic 3: world palettes / props / critters
 struct FoodItem;   // Epic 2/5: optional per-species food (else the drawn apple)
 
