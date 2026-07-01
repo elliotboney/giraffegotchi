@@ -18,9 +18,25 @@ static const AnimSet GIR_ANIMS = {
   /* tics */ GIR_TICS, 3,
 };
 
-// The savanna — the giraffe's biome (AD-15). Palette table is the frozen
-// pre-refactor PALETTES[8] (baseline §3.4), indexed by SkyPhase. Scene props
-// (grass/trees/stars/critters) join this in Story 3.2.
+// The savanna — the giraffe's biome (AD-15). All values are the frozen pre-
+// refactor scene literals (baseline §3.4 palette + the GRASS/STARS/tree/firefly
+// arrays from ui.cpp), now data.
+static const Blade SAV_GRASS[] = {
+  {  7,172,5,1,0x2A40}, { 22,171,4,1,0x2A40}, { 31,174,5,2,0x2A40},
+  { 64,172,5,1,0x2A40}, { 76,173,4,1,0x2A40},
+  {243,172,5,1,0x2A40}, {283,173,4,1,0x2A40}, {294,171,5,2,0x2A40}, {308,172,5,1,0x2A40},
+  {  9,183,8,2,0x3B80}, { 27,182,7,2,0x3B80}, { 70,184,8,2,0x3B80}, { 79,182,7,2,0x3B80},
+  {240,183,8,2,0x3B80}, {287,184,8,2,0x3B80}, {311,182,7,2,0x3B80},
+  { 12,196,11,4,0x4DA0}, { 30,194,10,4,0x4DA0}, { 73,196,12,4,0x4DA0},
+  {245,195,11,4,0x4DA0}, {289,196,11,4,0x4DA0}, {313,194,10,4,0x4DA0},
+};
+static const Star SAV_STARS[] = {
+  {28,52}, {52,84}, {74,112}, {248,64}, {276,98}, {300,120}, {312,72}, {40,128}, {64,150},
+};
+static const TreePos SAV_TREES[] = { {22, 172}, {298, 172} };
+static const Firefly SAV_FF[] = {
+  {30,136}, {55,150}, {72,126}, {250,142}, {286,130}, {306,152},
+};
 static const Biome SAVANNA = {
   { /* NIGHT     */ {0x0865, 0x2104},   // deep navy
     /* DAWN      */ {0x39ED, 0x2966},   // cool blue-violet, first light
@@ -30,6 +46,10 @@ static const Biome SAVANNA = {
     /* AFTERNOON */ {0xF64F, 0xCD0A},   // warm gold
     /* SUNSET    */ {0xE36B, 0x6A25},   // deep orange
     /* DUSK      */ {0x5A2F, 0x2947} }, // purple
+  SAV_GRASS, 22,
+  SAV_STARS, 9,
+  SAV_TREES, 2,
+  SAV_FF,    6,
 };
 
 // The giraffe as DATA — the reference species entry. Values are the frozen

@@ -10,9 +10,12 @@ const Rect PLAY_BTN  = {132, 198, 60, 38};
 const Rect CLEAN_BTN = {196, 198, 60, 38};
 const Rect BOOK_BTN  = {260, 198, 60, 38};
 
-// --- savanna scene ---
-static const int SUN_R = 16;
-static const int TREE_LX = 22, TREE_RX = 298, TREE_BASEY = 172;
+// --- scene ---
+static const int SUN_R = 16;   // sun/moon radius (universal, not biome-specific)
+
+// The active biome supplies all scene props (palette, grass, trees, stars,
+// fireflies) — AD-15. Null until a species declares one (guarded per use).
+static const Biome* biome() { return activeSpecies().biome; }
 
 // --- day/night palette (discrete phases) ---
 // Runtime sky/ground colours, swapped by setSkyPhase(). Default = day.
@@ -30,31 +33,9 @@ static bool s_celSun = true;
 static bool s_celForce = true;   // force a redraw next frame (after a sky repaint)
 void setCelestial(int cx, int cy, bool isSun) { s_celX = cx; s_celY = cy; s_celSun = isSun; }
 
-// Stars (night only) — fixed dots in the OPEN sky (clear of the giraffe box
-// x 85..235 and the top meter row), so the band sprite never has to own them.
-struct Star { int16_t x, y; };
-static const Star STARS[] = {
-  {28,52}, {52,84}, {74,112}, {248,64}, {276,98}, {300,120}, {312,72}, {40,128}, {64,150},
-};
-static const int STAR_N = sizeof(STARS) / sizeof(STARS[0]);
-
-// Layered grass: back row sits near the horizon (small, dark, gentle sway),
-// front row near the buttons (tall, bright, more sway) — gives depth. All x
-// positions stay clear of the poop slots (left ~x48, right ~x264).
-struct Blade { int16_t x, y, h, amp; uint16_t c; };
-static const Blade GRASS[] = {
-  // back row (short, dark, gentle) — scattered x, jittered height/y
-  {  7,172,5,1,0x2A40}, { 22,171,4,1,0x2A40}, { 31,174,5,2,0x2A40},
-  { 64,172,5,1,0x2A40}, { 76,173,4,1,0x2A40},
-  {243,172,5,1,0x2A40}, {283,173,4,1,0x2A40}, {294,171,5,2,0x2A40}, {308,172,5,1,0x2A40},
-  // mid row (medium)
-  {  9,183,8,2,0x3B80}, { 27,182,7,2,0x3B80}, { 70,184,8,2,0x3B80}, { 79,182,7,2,0x3B80},
-  {240,183,8,2,0x3B80}, {287,184,8,2,0x3B80}, {311,182,7,2,0x3B80},
-  // front row (tall, bright, most sway)
-  { 12,196,11,4,0x4DA0}, { 30,194,10,4,0x4DA0}, { 73,196,12,4,0x4DA0},
-  {245,195,11,4,0x4DA0}, {289,196,11,4,0x4DA0}, {313,194,10,4,0x4DA0},
-};
-static const int GRASS_N = sizeof(GRASS) / sizeof(GRASS[0]);
+// Grass/stars/trees/fireflies are now DATA in the active biome (AD-15) — see
+// species/giraffe.cpp SAVANNA. The Blade/Star/TreePos/Firefly types live in
+// species.h.
 
 static uint32_t s_phase = 0;                 // breeze phase (ms); set each frame by main
 void uiSetPhase(uint32_t now) { s_phase = now; }
@@ -83,9 +64,11 @@ static void celestialBox(int cx, int cy, int& x, int& y, int& w, int& h) {
 // Draw any stars overlapping the given rect (night only).
 static void drawStars(TFT_eSPI& tft, int x, int y, int w, int h) {
   if (s_phaseId != PHASE_NIGHT) return;
-  for (int i = 0; i < STAR_N; i++)
-    if (STARS[i].x >= x && STARS[i].x < x + w && STARS[i].y >= y && STARS[i].y < y + h)
-      tft.drawPixel(STARS[i].x, STARS[i].y, 0xFFFF);
+  const Biome* b = biome();
+  if (!b) return;
+  for (int i = 0; i < b->starN; i++)
+    if (b->stars[i].x >= x && b->stars[i].x < x + w && b->stars[i].y >= y && b->stars[i].y < y + h)
+      tft.drawPixel(b->stars[i].x, b->stars[i].y, 0xFFFF);
 }
 
 static int treeSway(int) { return 0; }   // sway disabled — trees stand still
@@ -210,12 +193,12 @@ static void eraseCelestial(TFT_eSPI& tft, int cx, int cy) {
 // --- ambient critters (time-of-day aware) ---
 // Fireflies blink in the open sky at dusk/night; a butterfly wanders low across
 // the sky by day. All live OUTSIDE the giraffe box so the band never owns them.
-static const int FF_N = 6;
-static const int FF_BX[FF_N] = { 30,  55,  72, 250, 286, 306 };  // all clear of box 85..235
-static const int FF_BY[FF_N] = {136, 150, 126, 142, 130, 152 };
-static int  s_ffX[FF_N]    = {-999,-999,-999,-999,-999,-999};
-static int  s_ffY[FF_N]    = {0};
-static bool s_ffShown[FF_N] = {false};
+// Firefly render-state cap (positions come from the active biome; this bounds the
+// per-instance blink/erase state).
+static const int MAX_FF = 12;
+static int  s_ffX[MAX_FF]     = {0};
+static int  s_ffY[MAX_FF]     = {0};
+static bool s_ffShown[MAX_FF] = {false};
 static int  s_flutterX = -999, s_flutterY = 0;   // wandering daytime butterfly
 
 static bool flutterInBox(int x) { return x + 8 > boxL() && x - 8 < boxR(); }
@@ -223,11 +206,13 @@ static bool flutterInBox(int x) { return x + 8 > boxL() && x - 8 < boxR(); }
 static void animateCritters(TFT_eSPI& tft) {
   const bool night = (s_phaseId == PHASE_DUSK || s_phaseId == PHASE_NIGHT);
   const bool day   = (s_phaseId >= PHASE_DAWN && s_phaseId <= PHASE_AFTERNOON);
+  const Biome* bio = biome();
 
   // Fireflies: gentle drift + blink. Erase/redraw only on change (low flicker).
-  for (int i = 0; i < FF_N; i++) {
-    const int nx = FF_BX[i] + (int)(6.0f * sinf((s_phase + i * 900)  / 700.0f));
-    const int ny = FF_BY[i] + (int)(4.0f * sinf((s_phase + i * 1300) / 500.0f));
+  const int ffn = bio ? (bio->ffN < MAX_FF ? bio->ffN : MAX_FF) : 0;
+  for (int i = 0; i < ffn; i++) {
+    const int nx = bio->fireflies[i].x + (int)(6.0f * sinf((s_phase + i * 900)  / 700.0f));
+    const int ny = bio->fireflies[i].y + (int)(4.0f * sinf((s_phase + i * 1300) / 500.0f));
     const bool lit = night && (sinf((s_phase + i * 1700) / 420.0f) > 0.25f);
     if (nx != s_ffX[i] || ny != s_ffY[i] || lit != s_ffShown[i]) {
       if (s_ffShown[i]) restoreBg(tft, s_ffX[i] - 2, s_ffY[i] - 2, 5, 5);
@@ -258,8 +243,9 @@ static void animateCritters(TFT_eSPI& tft) {
 // advanced here and drawn DIRECTLY only in open sky (clipped out of the giraffe
 // box); their in-box portion is handled by composeSkyBand().
 void animateScenery(TFT_eSPI& tft) {
-  for (int i = 0; i < GRASS_N; i++) {
-    const Blade& b = GRASS[i];
+  const Biome* bio = biome();
+  if (bio) for (int i = 0; i < bio->grassN; i++) {
+    const Blade& b = bio->grass[i];
     tft.fillRect(b.x - (b.amp + 3), b.y - b.h - 1, 2 * (b.amp + 3), b.h + 2, GROUND_COLOR);
     drawBlade(tft, b);
   }
@@ -294,8 +280,10 @@ void animateScenery(TFT_eSPI& tft) {
     if (celDrawnX > -900 && !s_celForce) eraseCelestial(tft, celDrawnX, celDrawnY);
     drawCelestialDirect(tft);
     int cbx, cby, cbw, cbh; celestialBox(s_celX, s_celY, cbx, cby, cbw, cbh);
-    if (overlap(cbx, cby, cbw, cbh, TREE_LX - 25, TREE_BASEY - 62, 50, 62)) drawTree(tft, TREE_LX, TREE_BASEY);
-    if (overlap(cbx, cby, cbw, cbh, TREE_RX - 25, TREE_BASEY - 62, 50, 62)) drawTree(tft, TREE_RX, TREE_BASEY);
+    if (bio) for (int i = 0; i < bio->treeN; i++) {   // re-occlude trees the body crossed
+      const TreePos& t = bio->trees[i];
+      if (overlap(cbx, cby, cbw, cbh, t.x - 25, t.baseY - 62, 50, 62)) drawTree(tft, t.x, t.baseY);
+    }
     celDrawnX = s_celX; celDrawnY = s_celY;
     s_celForce = false;
   }
@@ -340,10 +328,14 @@ static void drawProps(TFT_eSPI& tft, int x, int y, int w, int h) {
   // scenery layer (animateScenery + composeSkyBand) so it can duck behind the
   // giraffe. drawProps only restores the static props + stars.
   drawStars(tft, x, y, w, h);
-  if (overlap(x, y, w, h, TREE_LX - 25, TREE_BASEY - 62, 50, 62)) drawTree(tft, TREE_LX, TREE_BASEY);
-  if (overlap(x, y, w, h, TREE_RX - 25, TREE_BASEY - 62, 50, 62)) drawTree(tft, TREE_RX, TREE_BASEY);
-  for (int i = 0; i < GRASS_N; i++) {
-    const Blade& b = GRASS[i];
+  const Biome* bio = biome();
+  if (!bio) return;
+  for (int i = 0; i < bio->treeN; i++) {
+    const TreePos& t = bio->trees[i];
+    if (overlap(x, y, w, h, t.x - 25, t.baseY - 62, 50, 62)) drawTree(tft, t.x, t.baseY);
+  }
+  for (int i = 0; i < bio->grassN; i++) {
+    const Blade& b = bio->grass[i];
     if (overlap(x, y, w, h, b.x - (b.amp + 3), b.y - b.h - 1, 2 * (b.amp + 3), b.h + 2))
       drawBlade(tft, b);
   }

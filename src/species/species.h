@@ -61,12 +61,22 @@ struct FoodItem {
 };
 
 // --- Biome data (AD-15) — the world a species lives in ---
-// The biome owns the sky/ground palette TABLE (data); render/scene stays the sole
-// writer of the live SKY_COLOR/GROUND_COLOR + phase id (AD-10) and indexes this
-// table. Scene props (grass / trees / stars / critters) migrate here in Story 3.2.
+// The biome owns the sky/ground palette TABLE + the scene props (grass, trees,
+// stars, ambient fireflies). render/scene reads these; it stays the sole writer
+// of the live SKY_COLOR/GROUND_COLOR + phase id (AD-10). No prop array lives in
+// scene code any more.
 struct SkyColors { uint16_t sky, ground; };
+struct Blade   { int16_t x, y, h, amp; uint16_t c; };  // grass blade: pos, height, sway amp, colour
+struct Star    { int16_t x, y; };                      // night star
+struct TreePos { int16_t x, baseY; };                  // tree trunk base
+struct Firefly { int16_t x, y; };                      // firefly home position (drifts around it)
+
 struct Biome {
   SkyColors palette[8];   // per-phase sky/ground, indexed by SkyPhase (NIGHT..DUSK)
+  const Blade*   grass;     uint8_t grassN;
+  const Star*    stars;     uint8_t starN;
+  const TreePos* trees;     uint8_t treeN;
+  const Firefly* fireflies; uint8_t ffN;
 };
 
 struct Species {
