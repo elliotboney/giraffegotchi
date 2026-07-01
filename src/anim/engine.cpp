@@ -80,18 +80,31 @@ static const int      SLEEP_ZS = 3;
 
 // Cached decode of the active species' food sprite (decoded once per sprite; the
 // active-species swap in Epic 4 changes food.sprite, re-triggering the decode).
-static uint16_t*  s_foodBuf    = nullptr;
+static uint16_t*   s_foodBuf    = nullptr;
 static const char* s_foodSprite = nullptr;
+static int         s_foodW = 0, s_foodH = 0;
 
-static void drawFoodSprite(TFT_eSPI& c, const FoodItem& f, int cx, int cy) {
-  if (s_foodSprite != f.sprite) {          // (re)decode on change
-    free(s_foodBuf);
-    s_foodBuf = (uint16_t*)malloc((size_t)f.w * f.h * sizeof(uint16_t));
-    if (s_foodBuf && !renderPoseToBuffer(s_foodBuf, f.sprite, f.w)) { free(s_foodBuf); s_foodBuf = nullptr; }
-    s_foodSprite = f.sprite;
-  }
+// Composite the decoded food sprite into the band BY HAND at band-local centre
+// (cx,cy): byte-swapped + key-skipped + bounds-clipped, exactly like
+// composeSkyBand composites the pet. TFT_eSprite::pushImage has no working
+// transparent overload and runs off the sprite bounds — using it here froze the
+// device when the food dropped to a negative band-local y.
+static void blitFoodToBand(TFT_eSprite& band, int cx, int cy) {
   if (!s_foodBuf) return;
-  c.pushImage(cx - f.w / 2, cy - f.h / 2, f.w, f.h, s_foodBuf, s_foodBuf[0]);  // magenta key
+  uint16_t* dst = (uint16_t*)band.getPointer();
+  const int bw = band.width(), bh = band.height();
+  const uint16_t key = s_foodBuf[0];
+  const int x0 = cx - s_foodW / 2, y0 = cy - s_foodH / 2;
+  for (int j = 0; j < s_foodH; j++) {
+    const int by = y0 + j;
+    if (by < 0 || by >= bh) continue;
+    for (int i = 0; i < s_foodW; i++) {
+      const int bx = x0 + i;
+      if (bx < 0 || bx >= bw) continue;
+      const uint16_t p = s_foodBuf[j * s_foodW + i];
+      if (p != key) dst[by * bw + bx] = (uint16_t)((p << 8) | (p >> 8));
+    }
+  }
 }
 
 void anim::composeEat(TFT_eSPI& c, int ox, int oy, uint32_t t, Consume kind) {
@@ -111,14 +124,29 @@ void anim::composeEat(TFT_eSPI& c, int ox, int oy, uint32_t t, Consume kind) {
     return;
   }
 
+  if (activeSpecies().food) return;    // species food sprite is composited into the band (composeFoodBand)
+
+  int r = dropping ? FOOD_R : FOOD_R - step * (FOOD_R / EAT_BITES + 1);   // default: drawn apple, shrinks
+  if (r < 2) r = 2;
+  drawFood(c, a.mouthX - ox, y - oy, r);
+}
+
+// Composite the active species' food sprite into the band at the mouth (FR11).
+// No-op for a species that has no food (it uses the drawn apple in composeEat).
+void anim::composeFoodBand(TFT_eSprite& band, uint32_t t) {
   const FoodItem* food = activeSpecies().food;
-  if (food) {                          // per-species food sprite at the mouth (FR11)
-    drawFoodSprite(c, *food, a.mouthX - ox, y - oy);
-  } else {                             // default: drawn apple, shrinks in bites
-    int r = dropping ? FOOD_R : FOOD_R - step * (FOOD_R / EAT_BITES + 1);
-    if (r < 2) r = 2;
-    drawFood(c, a.mouthX - ox, y - oy, r);
+  if (!food) return;
+  if (s_foodSprite != food->sprite) {          // decode once (cached; re-decodes after a swap)
+    free(s_foodBuf);
+    s_foodBuf = (uint16_t*)malloc((size_t)food->w * food->h * sizeof(uint16_t));
+    if (s_foodBuf && !renderPoseToBuffer(s_foodBuf, food->sprite, food->w)) { free(s_foodBuf); s_foodBuf = nullptr; }
+    s_foodW = food->w; s_foodH = food->h; s_foodSprite = food->sprite;
   }
+  if (!s_foodBuf) return;
+  const SpeciesAnchors& a = activeSpecies().anchors;
+  int y = a.mouthY;
+  if (t < EAT_DROP_MS) { const float p = (float)t / EAT_DROP_MS; y = a.foodDropY + (int)((a.mouthY - a.foodDropY) * p); }
+  blitFoodToBand(band, a.mouthX - spriteX(), y - spriteY());
 }
 
 void anim::composeSleepZ(TFT_eSprite& c, uint32_t sinceStart) {

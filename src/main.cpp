@@ -831,6 +831,7 @@ void loop() {
   if (bandOk) {
     composeSkyBand(skyBand, giraffeBuf);
     if (eat.active) anim::composeEat(skyBand, spriteX(), spriteY(), now - eat.start, (Consume)eat.kind);
+    if (eat.active && (Consume)eat.kind == Consume::Apple) anim::composeFoodBand(skyBand, now - eat.start);
     if (slp.active) anim::composeSleepZ(skyBand, now - slp.start);
     if (showDream)  anim::composeDaydreamBand(skyBand, dream.icon);   // in-box part, atomic with the push
     if (play_.active && play_.kind == PLAY_BUTTERFLY) anim::composeButterfly(skyBand, now - play_.start, PLAY_MS[PLAY_BUTTERFLY]);

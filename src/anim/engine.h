@@ -25,6 +25,7 @@ namespace anim {
 // given surface only. Used for the band (in-box) and, for eat/daydream, the
 // direct panel path (out-of-box, viewport-clipped).
 void composeEat(TFT_eSPI& c, int ox, int oy, uint32_t t, Consume kind);   // apple shrink / glass drain at the mouth
+void composeFoodBand(TFT_eSprite& band, uint32_t t);                      // per-species food sprite, hand-composited into the band
 void composeSleepZ(TFT_eSprite& band, uint32_t sinceStart);               // rising Z's beside the head
 void composeDaydreamBand(TFT_eSprite& band, int icon);                    // in-box thought bubble
 void composeDaydreamDirect(TFT_eSPI& tft, int icon);                      // open-sky thought bubble (viewport-clipped)
