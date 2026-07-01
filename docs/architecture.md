@@ -1,139 +1,115 @@
 # Architecture — Giraffegotchi
 
-_Generated: 2026-06-30 · exhaustive scan_
+_Updated 2026-07-01 — as-built after the swappable-animals refactor (Epics 1–5)._
 
-This documents the **as-built** architecture and, because the next planned work is a
-refactor, calls out the **coupling and natural seams** so you can decide scope. See
-[STATUS.md](./STATUS.md) for the rendering internals and hard-won display gotchas — this
-doc does not repeat them.
+The giraffe is no longer hardcoded: it's **one data descriptor in a registry**, and animals
+are switched on-device. Render and animation read the *active* descriptor, so a new animal is
+data, not a code fork. The authoritative invariants are the architecture spine
+(`_bmad-output/planning-artifacts/architecture/.../ARCHITECTURE-SPINE.md`, AD-1..15); this doc
+is the as-built summary. See [STATUS.md](./STATUS.md) for rendering internals.
 
-## 1. Runtime shape
+## 1. Layers (one-way dependencies)
 
-A single-threaded Arduino `loop()` at ~100 Hz (`delay(10)`). Each frame:
+```
+main  →  { render, anim, species, core }  →  hardware libs
+```
+
+| Layer | Files | Role |
+|---|---|---|
+| **core** | `pet.{h,cpp}`, `core/sky.{h,cpp}` | Pure logic, no hardware. `pet` (left at `src/pet.*` — already clean) = meters/emotions/decay/night-sleep. `sky` = solar/phase math. Compiles + unit-tests under `env:native`. |
+| **species** | `species/species.h`, `species/registry.{h,cpp}`, `species/<animal>.cpp` | The `Species`/`AnimSpec`/`Biome`/`FoodItem` **data types** + the registry + each animal as a data file. Hardware-free (a `TFT_eSPI` forward-decl only, for the biome prop-hook pointer). |
+| **anim** | `anim/engine.{h,cpp}` | Species-agnostic animation engine: the emotion-base pose floor, idle rotation/tics, foreground composers (eat/sleep/daydream/bubbles/butterfly), per-species food. Reads the active descriptor; writes the pose buffer / composes the band; never pushes to the panel. |
+| **render** | `ui.{h,cpp}` (the `render/` layer) | Pixels: biome scene (palette/grass/trees/stars/critters from the active biome), sun/moon arc, the compositing band, sprite decode, meters/buttons/picker primitives. Sole writer of `SKY_COLOR`/`GROUND_COLOR` + the sky-phase id. |
+| **io** | `io/save.{h,cpp}` | NVS persistence: per-species care blocks + the active-species id. |
+| **orchestration** | `main.cpp` | `setup`/`loop`, timing, touch, WiFi/NTP driver, the **active-species pointer + atomic swap**, backlight, the picker UI. |
+
+## 2. The species descriptor (single source of animal truth — AD-11)
+
+`Species` (in `species.h`) carries **everything** animal-specific, so no giraffe-ism leaks into
+render/anim/main:
+
+- `name` (internal id / asset key), `displayName` (picker label), `assetFolder`.
+- `geom` — `w,h,x,y` + `horizonY` (buffers are sized from this; nothing assumes 150×160).
+- `anchors` — mouth / food-drop / sleep-Z / daydream positions.
+- `caps` — `Capability` flags (CAP_KITE/CAP_KICK): opt-in signature moves.
+- `anims` — `AnimSet` (idle rotation + variable-length tics).
+- `biome` — `Biome` (8-phase palette table + grass/stars/trees/fireflies + a tree draw-hook).
+- `food` — optional `FoodItem` (sprite + size); absent → the drawn apple.
+- `icon` — picker icon pose name (absent → name-only tile).
+
+The registry (`registry.cpp`) holds the `SPECIES[]` list; `main` is the only module that swaps
+(`setActiveSpecies`), everyone else reads `activeSpecies()`.
+
+## 3. Runtime shape (single-threaded `loop()`, ~100 Hz)
 
 ```
 loop():
-  pet.update(dt)              # advance decay/poop/sick timers (skipped while "dead")
-  uiSetPhase(now)             # breeze phase for grass sway
-  updateDayNight() [1/min]    # recompute sun pos + sky phase; repaint on phase change
-  read touch (edge-triggered) # map raw XPT2046 → screen coords → hit-test buttons
-    → care actions / prank death / revive
-  backlight dim check
-  animateScenery(tft)         # grass, clouds, birds, sun/moon (direct draw, open sky)
-  giraffe ownership block     # pick pose: eat / kick / emotion / happy-rotation / tics
-  composeSkyBand + pushSprite # atomic composite of everything in the giraffe footprint
+  apply latched species swap  (top of loop only — AD-13)
+  pet.update(dt)              (skipped while dead)
+  updateDayNight() [1/min]    (recompute sun pos + phase; setSkyPhase indexes the ACTIVE biome)
+  touch: care actions (press edge) · BOOK tap=read / hold=picker · fast-mash die/revive
+  picker modal (if open): render grid, route taps, else early-return
+  animateScenery(tft)         (biome grass/trees/critters + open-sky clouds/birds/sun/moon)
+  anim engine: resolve the one pose writer this frame (dead > kick > tic > emotion — AD-5)
+  composeSkyBand + foreground composers + pushSprite   (one atomic in-box push)
   meters / poop redraw on change
-  saveState() [throttled 5s]  # persist care stats to NVS if dirty
+  save::tick(now)             (throttled ≤ once / 5 s)
 ```
 
-The **compositing band** (`skyBand`, an off-screen `TFT_eSprite` the size of the giraffe
-footprint) is the heart of the renderer: the panel has no double-buffering, so anything that
-must sit behind/in front of the giraffe without flicker is composited once and pushed
-atomically. Full detail in STATUS.md §3.
+The **compositing band** (`skyBand`, an off-screen `TFT_eSprite` sized to the active footprint)
+is the heart of the renderer: the panel isn't double-buffered, so in-box content is composited
+once and pushed atomically. Out-of-box content draws direct with a viewport pixel-clip.
 
-## 2. Module dependency map
+## 4. Live species swap (AD-13)
 
-```
-          ┌────────────┐
-          │  main.cpp  │  orchestration, I/O, state machines (891 LOC)
-          └─────┬──────┘
-       ┌────────┴─────────┐
-       ▼                  ▼
- ┌───────────┐      ┌───────────┐
- │   pet.*   │      │   ui.*    │
- │  PURE     │◄─────│ uses      │  ui reads Pet:: constants (LOW_THRESHOLD, MAX_POOP)
- │  logic    │      │ rendering │  and Emotion enum
- └───────────┘      └─────┬─────┘
-   no deps                ▼
-                   TFT_eSPI, PNGdec, LittleFS  (hardware libs)
-```
+A swap request is **latched** and applied at exactly one point — the top of `loop()`, before
+`pet.update()` — as an atomic sequence, so no frame straddles two species:
 
-- **`pet`** depends on nothing (only `<stdint.h>`). Clean, isolated, testable. ✅
-- **`ui`** depends on `pet.h` (for `Emotion`, `StatId`, thresholds) and the TFT/PNG/FS libs.
-- **`main`** depends on both, plus WiFi, NVS (`Preferences`), and `time.h`.
+1. cancel all in-flight animations + reset pose state,
+2. `save::captureActive` (animal A's stats), switch species, re-create the band to the new
+   footprint (the pose buffer is allocated **once at the max species size** in `setup`, never
+   reallocated — this avoids the 2×-buffer heap peak that would otherwise fail/fragment),
+3. `save::loadActive` (animal B's own stats), decode B's sprites + reset anim indices,
+4. refresh the palette from B's biome + full-screen repaint (clears any out-of-box element),
+   then persist.
 
-### Cross-module coupling (the part that matters for refactoring)
+Triggered by the on-device picker (long-press BOOK → grid → tap). A dev serial trigger exists
+behind `-DDEBUG_SWAP` only.
 
-`main.cpp` reaches into `ui` through a **wide surface of `extern` globals and free
-functions**, not a narrow interface:
+## 5. Persistence (AD-8)
 
-- Geometry constants: `GIRAFFE_X/Y/W/H`, `HORIZON_Y`, `BAND_H`, `BOX_L/BOX_R`.
-- Live palette globals: `SKY_COLOR`, `GROUND_COLOR` (mutated by `setSkyPhase`).
-- Button hit-rects: `FEED_BTN`, `DRINK_BTN`, `PLAY_BTN`, `CLEAN_BTN`, `BOOK_BTN`.
-- ~20 free draw functions: `drawScene`, `restoreBg`, `composeSkyBand`, `drawMeters`,
-  `drawFood`, `drawKite`, `celestialPos`, `solarTimes`, etc.
+NVS namespace `"giraffe"`, key `"pet"`. Versioned blob (`SAVE_MAGIC = 0x69`):
+`{ magic, activeIdx, CareBlock[MAX_SP] }` where `CareBlock = { hu, th, fn, hy, poop, dead }`.
+On boot the active id is validated against the registry (unknown → default species, no
+boot-loop); each animal's block is independent (FR12). Restore is as-is (no decay advance).
+Throttled ≤ once / 5 s, plus immediate writes on swap/die/revive.
 
-`ui.cpp` itself carries **file-static mutable state**: the PNG decode target globals
-(`g_tft`, `g_buf`, `g_bufW`), cloud/bird/firefly positions, celestial position, sky phase id.
-This is fine for a single-instance firmware but is the reason the rendering layer is not
-independently testable.
+## 6. Key invariants (keep true)
 
-## 3. Invariants (the spine — keep these true through any refactor)
+1. **core stays hardware-free** — `pet`/`sky` compile under `env:native`; 43 tests are the safety net.
+2. **No species-specific literal outside the descriptor** (paths, geometry, anchors, palette, props).
+3. **Magenta `0xF81F` is the transparency key**, read at runtime from `giraffeBuf[0]`; never inside a silhouette. Keep `prep_sprite.py MAGENTA_RGB` in lockstep.
+4. **All erases go through `restoreBg`** (never a flat fill; `readRect` is broken on this CYD).
+5. **One pose-buffer writer per frame** by priority `dead > kick > tic > emotion` (AD-5); foreground anims compose into the band and never touch the pose buffer.
+6. **Anything crossing the box is split** into out-of-box direct (viewport clip) + in-box band composite — pixel-level, never whole-object skip.
+7. **`TFT_eSprite::pushImage` has no working transparent overload** — composite into the band by hand (byte-swap + key-skip + bounds-clip). `pushImage(..., key)` on a sprite can run off-bounds and freeze the device.
+8. **Display on HSPI, touch on VSPI** — separate buses.
 
-1. **`pet` stays hardware-free.** No Arduino/TFT includes in `pet.h`/`pet.cpp`, so
-   `env:native` keeps compiling it and the 37 tests keep running.
-2. **Display on HSPI, touch on VSPI, separate buses.** Collapsing them breaks the display.
-3. **Magenta `0xF81F` is the transparency key.** Must never appear inside a giraffe
-   silhouette; `giraffeBuf[0]` (top-left) is read as the key at runtime.
-4. **All erases go through `restoreBg`**, never a flat fill — it repaints the correct sky/
-   ground band + any overlapping prop. Panel readback (`readRect`) does NOT work on this CYD.
-5. **Anything crossing the giraffe box is split** into an out-of-box direct draw (viewport
-   pixel-clip) + an in-box band composite. Pixel-level clip, never whole-object skip.
-6. **NVS save is throttled** (≤ once / 5 s) to spare flash; the save layout is versioned by
-   `SAVE_MAGIC` — bump it if `PetSave` changes.
-
-## 4. Data & persistence
-
-- **In-RAM state:** `Pet` holds the 4 stats + timers + poop count. All animation state lives
-  in `main.cpp` structs (`EatAnim`, `SleepAnim`, `DaydreamAnim`, `PlayAnim`, `CleanAnim`).
-- **Persisted (NVS namespace `"giraffe"`):** `PetSave{ magic, hunger, thirst, fun, hygiene,
-  poop, dead }` — care stats + the prank-death flag. Restore is as-is (a power cut does not
-  age the pet). No decay/time is persisted.
-- **Filesystem (LittleFS):** 22 PNG sprites, read on demand at draw time.
-
-## 5. Hardware interface (pinout)
-
-From `platformio.ini` build flags + `main.cpp`:
+## 7. Hardware (pinout)
 
 | Function | Pin(s) | Bus |
 |---|---|---|
 | Display (ILI9341) | MISO 12, MOSI 13, SCLK 14, CS 15, DC 2, RST -1, BL 21 | HSPI |
 | Touch (XPT2046) | IRQ 36, MOSI 32, MISO 39, CLK 25, CS 33 | VSPI |
-| Backlight PWM | GPIO 21 (TFT_BL) via `ledc` ch 0, 5 kHz, 8-bit | — |
-| Speaker (unused) | GPIO 26 (noted in backlog) | — |
+| Backlight PWM | GPIO 21 via `ledc` ch 0, 5 kHz, 8-bit | — |
+| Speaker (unused) | GPIO 26 | — |
 
 Touch is calibrated with raw bounds `TS_MINX/MAXX/MINY/MAXY` and inverted to match the 180°
 display flip (`setRotation(3)`).
 
----
+## 8. Art pipeline (AD-14)
 
-## 6. Refactor seams (why this is a *structural* refactor)
-
-`pet` needs nothing. The opportunity is entirely in **`main.cpp` (891 LOC) and `ui.cpp`
-(684 LOC)**, both of which mix several concerns in one translation unit. Natural extractions,
-roughly in order of value-to-risk:
-
-| # | Seam | Extract from → to | Why | Risk |
-|---|---|---|---|---|
-| 1 | **Solar/sky math** | `ui.cpp` → new `sky.{h,cpp}` | `solarTimes`, `celestialPos`, `skyPhaseFor`, `dayOfYear` are **pure functions** — make them unit-testable like `pet` (add to `env:native`). | Low |
-| 2 | **Animation state machines** | `main.cpp` → `anim.{h,cpp}` | Eat/sleep/daydream/play(×4)/clean/tics/happy-rotation are ~500 of main's 891 lines. Each is a self-contained `struct + start + tick`. | Medium (they touch `giraffeBuf` + band) |
-| 3 | **Day/night driver** | `main.cpp` → `daynight.{h,cpp}` | `syncTime`, `tzOffsetMinutes`, `updateDayNight`, phase-change repaint. Owns WiFi + clock. | Medium (calls back into scene repaint) |
-| 4 | **Persistence** | `main.cpp` → `save.{h,cpp}` | `PetSave`, `saveState`, `loadState`, dirty/throttle. Small, isolated, clear boundary. | Low |
-| 5 | **Rendering primitives vs scene** | split `ui.cpp` | `drawFood/Drink/Ball/Sparkle/Butterfly/Bubble/Kite` (stateless primitives) vs the stateful scene compositor. | Low–Medium |
-
-**The core tension:** the animation state machines (#2) and the band compositor share a lot of
-implicit contract — pose ownership of `giraffeBuf`, who draws into the band vs direct, the
-box-split rule. Extracting them cleanly means **first defining that contract as an interface**
-(e.g. an `Animation` that returns "what to composite into the band this frame"), which is the
-real design work. Everything else (1, 3, 4, 5) is mechanical file-splitting.
-
-**Recommended sequencing if you proceed:** do the low-risk pure extractions first (#1 solar
-math, #4 persistence) to build confidence and test coverage, then tackle the animation-system
-contract (#2) as its own epic, then #3/#5. This is the kind of multi-step restructure the
-BMad epics-and-stories flow is built for.
-
-### Safety net that already exists
-- 37 native tests cover `pet` — refactors there are safe. **There are no tests for `ui`/
-  `main`** (hardware-bound). Extracting the pure math (#1) is the cheapest way to grow the
-  tested surface before touching rendering.
-- `git` is clean on `main`; every change is flash-verifiable on the device.
+Per-species folders on LittleFS (`data/<species>/`, identical filenames). `tools/prep_sprite.py`
+keys transparent source → magenta, aligns frames, despeckles, sizes by asset type, and reports
+the flash budget (fails if over). Two full animals ≈ 320 KB (~21% of the partition). See the
+[development guide](./development-guide.md) and the README's "Adding an animal".

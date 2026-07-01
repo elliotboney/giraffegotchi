@@ -1,79 +1,86 @@
 # Development Guide — Giraffegotchi
 
-_Generated: 2026-06-30_
+_Updated 2026-07-01 (post swappable-animals refactor)._
 
 ## Prerequisites
 
-- **[PlatformIO](https://platformio.org/)** (CLI or IDE).
-- **Python 3 + Pillow** — only for the art pipeline (`tools/prep_sprite.py`). Not needed to
-  build firmware.
-- **A CYD board** (ESP32-2432S028R) + USB cable for on-device work. The CH340 serial number
-  changes per USB slot — find it with `ls /dev/cu.*usbserial*`.
+- **[PlatformIO](https://platformio.org/)** (`pio`).
+- **[bun](https://bun.sh)** + **Python 3.12** — for the art pipeline and the command shortcuts.
+- **A CYD board** (ESP32-2432S028R) + USB. Find the port with `ls /dev/cu.*usbserial*`.
+
+One-time: `bun setup` creates `.venv/` and installs Pillow (Python 3.14 has no Pillow wheels yet, so the venv pins 3.12).
+
+## Commands (`package.json` bun scripts)
+
+| Command | Raw equivalent |
+|---|---|
+| `bun compile` | `pio run -e esp32dev` |
+| `bun upload` | `pio run -e esp32dev -t upload` |
+| `bun uploadfs` | `pio run -e esp32dev -t uploadfs` |
+| `bun flash` | `pio run -e esp32dev -t upload -t uploadfs` |
+| `bun native` | `pio test -e native` |
+| `bun monitor` | `pio device monitor -e esp32dev` |
+| `bun prep [name]` | `.venv/bin/python tools/prep_sprite.py [name]` |
+
+- **`bun upload`** for code-only changes; **`bun flash`** (or `bun uploadfs`) whenever `data/` sprites changed. After `uploadfs`, the firmware reads each PNG from flash on draw.
+- Port "busy or doesn't exist" ≈ board unplugged or a serial monitor holding it.
 
 ## Environments
 
-`platformio.ini` defines two:
+`platformio.ini`:
 
-| Env | Target | What compiles | Use |
+| Env | Target | Compiles | Use |
 |---|---|---|---|
-| `esp32dev` | ESP32 hardware | all of `src/` | build + flash firmware |
-| `native` | host machine | **only `pet.cpp`** (`build_src_filter`) | run unit tests, no board |
-
-## Commands
-
-```bash
-pio test -e native                                   # run the 37 pet-logic unit tests
-pio run -e esp32dev                                  # compile firmware
-pio run -e esp32dev -t upload   --upload-port <PORT> # flash firmware (auto-resets board)
-pio run -e esp32dev -t uploadfs --upload-port <PORT> # flash sprites (data/) to LittleFS
-```
-
-- **`uploadfs` is only needed when sprites in `data/` change.** Firmware-only changes just
-  need `upload`.
-- After `uploadfs`, tap **RST** (or trigger a redraw) — the firmware reads each PNG from flash
-  on draw.
-- Port "busy or doesn't exist" almost always = board unplugged or a serial monitor holding it.
+| `esp32dev` | ESP32 | all of `src/` | build + flash |
+| `native` | host | `pet.cpp` + `core/sky.cpp` (`build_src_filter`) | unit tests, no board |
 
 ## Configuration (`.env`)
 
-WiFi + location live in a gitignored `.env` at the project root, injected as build flags by
-the `tools/load_env.py` pre-build hook:
+WiFi + location in a gitignored `.env`, injected as build flags by `tools/load_env.py`:
 
 ```ini
 WIFI_SSID="Your Network"
 WIFI_PW="your-password"
 LAT=30.0858
 LON=-97.8403
-TZ=CST6CDT,M3.2.0,M11.1.0    # POSIX TZ, handles DST
+TZ=CST6CDT,M3.2.0,M11.1.0
 ```
 
-Without `.env` the firmware still builds — it skips WiFi/NTP and stays in daytime.
+No `.env` → still builds, skips WiFi/NTP, stays daytime.
 
 ## Art pipeline
 
-```bash
-python3 -m venv /tmp/venv && /tmp/venv/bin/pip install Pillow   # one-time
-/tmp/venv/bin/python tools/prep_sprite.py                        # img/ -> data/
-pio run -e esp32dev -t uploadfs --upload-port <PORT>            # then flash the new sprites
+Source art is **transparent-background**, in per-species folders:
+
+```
+img/<species>/*.png          body poses   -> data/<species>/<pose>.png   (150x160, or per BODY_SIZES)
+img/<species>/objects/*.png  props/food   -> data/<species>/<name>.png   (small, per OBJECT_SIZES)
+img/<species>/icon.png       picker icon  -> data/<species>/icon.png      (64x64)
 ```
 
-To add a pose: drop `img/<name>.png`, add `<name>` to the `FRAMES` list in `prep_sprite.py`,
-regenerate, then `uploadfs`. Sprites are 150×160 with a solid **magenta** background that the
-firmware keys out as transparent — magenta must never appear inside the silhouette.
+`bun prep` (all) or `bun prep <species>` (one). `prep_sprite.py`:
+- keys **alpha → magenta** (`0xF81F`); opaque legacy art falls back to border-bg keying,
+- auto-discovers species + poses (no hardcoded pose list; single-frame blink is fine),
+- **aligns** a species' idle/emotion frames to a common bbox so the body doesn't jump between poses (kick/dead framed individually),
+- despeckles stray edge pixels, sizes by asset type,
+- reports the LittleFS budget and **exits non-zero if over** (so `uploadfs` can't silently truncate).
 
-## Testing approach
+Then `bun uploadfs`. Magenta must never appear inside a silhouette (it's the transparency key, read at runtime from `giraffeBuf[0]`).
 
-- **`pet` is the only tested module** — 37 Unity tests in `test/test_pet/test_pet.cpp` cover
-  decay, clamping, poop timing, emotion priority/tie-breaks, night sleep, and NVS load/clamp.
-- Tests run on `native` (no hardware) because `pet` has no Arduino includes. **Keep it that
-  way** — it's the project's main automated safety net.
-- `ui`/`main` are hardware-bound and currently have no automated tests; changes there are
-  verified by flashing and watching the device (and the serial log — most subsystems print
-  `[daynight]`, `[save]`, `[prank]` traces).
+## Adding an animal
 
-## Conventions observed in the codebase
+Data + art only — no engine changes. See the **Adding an animal** section in the top-level [README](../README.md#adding-an-animal): drop `img/<name>/` art → `bun prep <name>` → add `src/species/<name>.cpp` (copy `groundhog.cpp`) → register in `registry.cpp` → `bun flash`.
 
-- Constants live as `static constexpr` in `Pet` or `static const` file-scope in `ui`/`main`,
-  each with an inline comment explaining the tuning rationale.
-- Comments are dense and explain **why** (especially rendering gotchas) — match that density.
-- Erases always go through `restoreBg`, never a flat fill (see [architecture.md](./architecture.md) invariant #4).
+## Testing
+
+- **`core` (pet + sky) is the tested surface** — 43 Unity tests (`test/test_pet`, `test/test_sky`) cover decay/clamp/poop/emotion/night/load and the solar/phase math. They run on `native` (no hardware includes) — keep it that way.
+- `render`/`anim`/`species`/`io`/`main` are hardware-bound; verify by flashing + watching the device and the serial traces (`[daynight]`, `[save]`, `[swap]`, `[prank]`).
+- The Epic 1 behavior-neutral A/B baseline lives in `_bmad-output/implementation-artifacts/epic1-baseline.md` — a good on-device checklist after render changes.
+
+## Conventions
+
+- One-way layer deps: `main → {render, anim, species, core} → hardware`. `core`/`species` are hardware-free.
+- Everything species-specific (paths, geometry, anchors, palette, anims, food) lives **only** in the `Species` descriptor — no giraffe-isms in render/anim/main.
+- Erases go through `restoreBg`, never a flat fill. In-box content composites into the one `skyBand` sprite, pushed once per frame (flicker-free).
+- **`TFT_eSprite::pushImage` has no working transparent overload** — composite into the band by hand (byte-swap + key-skip + bounds-clip), like `composeSkyBand` / `blitFoodToBand`. Using `pushImage(..., key)` on a sprite can run off-bounds and freeze the device.
+- Constants are `static constexpr`/`static const` with an inline rationale; comments explain **why**.
