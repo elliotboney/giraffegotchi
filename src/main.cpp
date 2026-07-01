@@ -761,7 +761,9 @@ void loop() {
         s_tapStreak = fast ? s_tapStreak + 1 : 1;
         if (s_tapStreak >= FAST_TAP_REVIVE) revive();
       }
-    } else if (!bookTouched) {                 // BOOK is handled by the hold logic below
+    } else if (bookTouched) {
+      pet.read();                              // BOOK tap = read, instant on press (like the others)
+    } else {
       bool care = true;
       if      (FEED_BTN.contains(sx, sy))  { pet.feed();  startEat(now, (int)Consume::Apple); }
       else if (DRINK_BTN.contains(sx, sy)) { pet.drink(); startEat(now, (int)Consume::Water); }
@@ -775,16 +777,14 @@ void loop() {
     }
   }
 
-  // BOOK tap/hold (alive only), tolerant of brief touch flicker at the panel edge
-  // via a grace window: a quick tap = read, a ~800ms hold = open the picker.
+  // BOOK hold -> picker (alive only), grace-tolerant so a hold at the flaky panel
+  // edge sticks. The tap (read) already fired on the press above.
   if (!s_dead && bookTouched) {
-    if (press) wakeScreen(now);
     if (!s_bookHolding) { s_bookHolding = true; s_pressStart = now; s_longFired = false; }
     s_bookLastSeen = now;
     if (!s_longFired && now - s_pressStart >= LONG_PRESS_MS) { s_longFired = true; openPicker(); }
   } else if (s_bookHolding && now - s_bookLastSeen > BOOK_GRACE) {
-    if (!s_longFired) pet.read();              // short BOOK tap = read
-    s_bookHolding = false;
+    s_bookHolding = false;                      // hold ended
   }
   wasDown = down;
 
