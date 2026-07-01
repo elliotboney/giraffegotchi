@@ -58,7 +58,7 @@ extern const Species GROUNDHOG = {   // `extern` for external linkage (const is 
   "groundhog",
   "/groundhog",
   /* geom    */ { 150, 150, 85, 44, 165 },   // squat: H 150, sits at y44..194 on the ground
-  /* anchors */ { 160, 110, 60, 195, 90, 210, 54, 225, 54 },  // mouth / food-drop / sleep / dream
+  /* anchors */ { 170, 110, 60, 195, 90, 210, 54, 225, 54 },  // mouth / food-drop / sleep / dream
   /* caps    */ CAP_NONE,                     // no signature moves (PLAY = butterfly/bubbles only)
   /* anims   */ &GH_ANIMS,
   /* biome   */ &MEADOW,

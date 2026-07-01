@@ -78,6 +78,7 @@ EatAnim eat;
 // is used as the transparent colour so background pixels are skipped, letting
 // the scene and any clouds/birds drawn before this call show through.
 static void pushGiraffe() {
+  if (!giraffeBuf) return;
   tft.pushImage(spriteX(), spriteY(), spriteW(), spriteH(), giraffeBuf, giraffeBuf[0]);
 }
 
@@ -444,6 +445,18 @@ static void wakeScreen(uint32_t now) {
 // --- runtime species swap (AD-13) ---
 static int s_pendingSwap = -1;   // latched swap request (registry index); applied atop loop()
 
+// Bytes for the pose buffer sized to the LARGEST species — allocated once so a
+// swap never reallocates it (see applySpeciesSwap). The buffer is packed at the
+// active width per decode; oversize is harmless.
+static size_t maxPoseBytes() {
+  size_t m = 0;
+  for (int i = 0; i < speciesCount(); i++) {
+    const size_t n = (size_t)speciesAt(i).geom.w * speciesAt(i).geom.h;
+    if (n > m) m = n;
+  }
+  return m * sizeof(uint16_t);
+}
+
 // (Re)load the beach-ball sprite for the ACTIVE species (kick prop). ballOk stays
 // false if the species has no ball. Used at boot and after a swap.
 static void reloadBall() {
@@ -470,14 +483,15 @@ static void applySpeciesSwap(int idx) {
   eat.active = play_.active = cln.active = slp.active = dream.active = false;
   s_kickPose = -1;
 
-  // 2. preserve the CURRENT animal's care state, then size the pose buffer to the
-  //    new geometry. Build the new buffer BEFORE freeing the old — an alloc
-  //    failure keeps the current species (fail-safe) rather than crashing.
+  // 2. preserve the CURRENT animal's care state, switch species, and re-create the
+  //    compositing band to the new footprint. The pose buffer is allocated ONCE at
+  //    the max species size (setup) and never reallocated — a swap only re-creates
+  //    the band, which reuses its just-freed block. (Reallocating the pose buffer
+  //    too held both species' large buffers at once, exhausting/fragmenting the
+  //    heap so the fail-safe reverted the swap and left a black screen.)
+  (void)prevIdx;
   save::captureActive(pet, s_dead);   // A's stats kept (FR12)
   setActiveSpecies(idx);
-  uint16_t* nb = (uint16_t*)malloc(spriteW() * spriteH() * sizeof(uint16_t));
-  if (!nb) { setActiveSpecies(prevIdx); Serial.println("[swap] alloc failed — kept current"); return; }
-  free(giraffeBuf); giraffeBuf = nb;
   skyBand.deleteSprite();
   bandOk = (skyBand.createSprite(spriteW(), bandH()) != nullptr);
 
@@ -601,7 +615,7 @@ void setup() {
   save::begin();                   // open NVS
   save::restore(pet, s_dead);      // set active species + restore its care block
 
-  giraffeBuf = (uint16_t*)malloc(spriteW() * spriteH() * sizeof(uint16_t));
+  giraffeBuf = (uint16_t*)malloc(maxPoseBytes());   // sized to the largest species; never realloc'd on swap
   if (!giraffeBuf) Serial.println("giraffeBuf malloc failed — giraffe won't render");
 
   // Off-screen sky-band compositor (~25 KB). The giraffe is composited into it by
