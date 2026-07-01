@@ -497,6 +497,25 @@ static void applySpeciesSwap(int idx) {
   Serial.printf("[swap] now %s\n", activeSpecies().name);
 }
 
+// --- animal picker (long-press BOOK) ---
+// Story 4.3 opens a placeholder; Story 4.4 replaces it with the full grid.
+static const uint32_t LONG_PRESS_MS = 800;   // BOOK held this long -> open the picker
+static bool     s_pickerOpen = false;
+static uint32_t s_pressStart = 0;            // when the current touch began
+static bool     s_pressBook  = false;        // current press began inside the BOOK rect
+static bool     s_longFired  = false;        // long-press already fired this hold
+
+static void drawPickerPlaceholder() {
+  tft.fillScreen(TFT_NAVY);
+  tft.setTextColor(TFT_WHITE);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("picker coming", 160, 108, 4);
+  tft.drawString("tap to close", 160, 140, 2);
+}
+static void openPicker()  { s_pickerOpen = true; drawPickerPlaceholder(); }
+static void closePicker() { s_pickerOpen = false; repaintScene(); }
+static void pickerHandleTap(int /*sx*/, int /*sy*/) { closePicker(); }  // 4.4: grid selection
+
 void setup() {
   Serial.begin(115200);
 
@@ -622,45 +641,71 @@ void loop() {
   if (now >= nextDayNight) { nextDayNight = now + 60000; updateDayNight(false); }
 #endif
 
-  // Edge-triggered feed: one feed per press, not while held.
+  // --- touch: taps + fast-mash prank + BOOK long-press + the picker modal ---
+  // Care buttons act on the press edge (as before). BOOK is disambiguated: a
+  // quick tap = read (fires on release), a ~800ms hold = open the picker, and a
+  // fast mash while dead = revive (on press) — the three never overlap.
   const bool down = ts.touched();
-  if (down && !wasDown) {
+  int sx = -1, sy = -1;
+  if (down) {
     TS_Point p = ts.getPoint();
     if (p.z > 0) {  // ignore ghost / zero-pressure reads
-      wakeScreen(now);   // any tap restores full brightness
       // NOTE: if the FEED button doesn't respond in landscape on your unit,
       // the touch axes are swapped — map p.y to sx and p.x to sy instead.
-      int sx = constrain(map(p.x, TS_MINX, TS_MAXX, 0, tft.width()),  0, tft.width()  - 1);
-      int sy = constrain(map(p.y, TS_MINY, TS_MAXY, 0, tft.height()), 0, tft.height() - 1);
+      sx = constrain(map(p.x, TS_MINX, TS_MAXX, 0, tft.width()),  0, tft.width()  - 1);
+      sy = constrain(map(p.y, TS_MINY, TS_MAXY, 0, tft.height()), 0, tft.height() - 1);
       sx = tft.width()  - 1 - sx;   // touch inverted to match the 180° display flip
       sy = tft.height() - 1 - sy;
-      const bool fast = (now - s_lastTap < FAST_TAP_MS);
-      s_lastTap = now;
-
-      if (s_dead) {
-        // Only fast mashing of the BOOK button brings it back.
-        if (BOOK_BTN.contains(sx, sy)) {
-          s_tapStreak = fast ? s_tapStreak + 1 : 1;
-          if (s_tapStreak >= FAST_TAP_REVIVE) revive();
-        }
-      } else {
-        bool care = true;
-        if      (FEED_BTN.contains(sx, sy))  { pet.feed();  startEat(now, (int)Consume::Apple); }
-        else if (DRINK_BTN.contains(sx, sy)) { pet.drink(); startEat(now, (int)Consume::Water); }
-        else if (PLAY_BTN.contains(sx, sy))  { pet.play();  startPlay(now); }
-        else if (CLEAN_BTN.contains(sx, sy)) { const uint8_t n = pet.poopCount(); pet.clean(); startClean(now, n); }
-        else { if (BOOK_BTN.contains(sx, sy)) pet.read(); care = false; }
-        if (care) {                                  // fast care-button mashing kills it
-          s_tapStreak = fast ? s_tapStreak + 1 : 1;
-          if (s_tapStreak >= FAST_TAP_DIE) die();
-        }
-      }
     }
   }
+  const bool press   = down && !wasDown && sx >= 0;   // valid press edge
+  const bool release = !down && wasDown;
+
+  if (s_pickerOpen) {
+    if (press) { wakeScreen(now); pickerHandleTap(sx, sy); }
+    wasDown = down;
+    delay(10);
+    return;                          // modal: skip the pet render while the picker is up
+  }
+
+  if (press) {
+    wakeScreen(now);                 // any tap restores full brightness
+    const bool fast = (now - s_lastTap < FAST_TAP_MS);
+    s_lastTap = now;
+    s_pressStart = now; s_longFired = false;
+    s_pressBook = BOOK_BTN.contains(sx, sy);
+
+    if (s_dead) {
+      if (BOOK_BTN.contains(sx, sy)) {         // fast mashing revives (on press)
+        s_tapStreak = fast ? s_tapStreak + 1 : 1;
+        if (s_tapStreak >= FAST_TAP_REVIVE) revive();
+      }
+    } else {
+      bool care = true;
+      if      (FEED_BTN.contains(sx, sy))  { pet.feed();  startEat(now, (int)Consume::Apple); }
+      else if (DRINK_BTN.contains(sx, sy)) { pet.drink(); startEat(now, (int)Consume::Water); }
+      else if (PLAY_BTN.contains(sx, sy))  { pet.play();  startPlay(now); }
+      else if (CLEAN_BTN.contains(sx, sy)) { const uint8_t n = pet.poopCount(); pet.clean(); startClean(now, n); }
+      else care = false;                       // BOOK: read on release, picker on hold
+      if (care) {                              // fast care-button mashing kills it
+        s_tapStreak = fast ? s_tapStreak + 1 : 1;
+        if (s_tapStreak >= FAST_TAP_DIE) die();
+      }
+    }
+  } else if (down && wasDown && s_pressBook && !s_dead && !s_longFired
+             && now - s_pressStart >= LONG_PRESS_MS) {
+    s_longFired = true;              // BOOK held: open the picker (once per hold, alive only)
+    openPicker();
+  } else if (release && s_pressBook && !s_longFired && !s_dead) {
+    pet.read();                      // BOOK short tap = read
+  }
+  if (release) s_pressBook = false;
   wasDown = down;
 
   // Dim the backlight after a stretch of no touches.
   if (!s_dimmed && now - s_lastInteract > DIM_AFTER_MS) { backlight(BL_DIM); s_dimmed = true; }
+
+  if (s_pickerOpen) { delay(10); return; }   // picker just opened this frame — skip the pet render
 
   animateScenery(tft);   // grass/trees + open-sky clouds/birds (clipped to box edges)
 
