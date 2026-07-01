@@ -14,6 +14,7 @@ One-time: `bun setup` creates `.venv/` and installs Pillow (Python 3.14 has no P
 
 | Command | Raw equivalent |
 |---|---|
+| `bun run help` | (lists these commands) |
 | `bun compile` | `pio run -e esp32dev` |
 | `bun upload` | `pio run -e esp32dev -t upload` |
 | `bun uploadfs` | `pio run -e esp32dev -t uploadfs` |

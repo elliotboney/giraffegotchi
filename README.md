@@ -61,6 +61,7 @@ Requires [PlatformIO](https://platformio.org/) (`pio`) and, for the art pipeline
 
 | Command | What |
 |---|---|
+| `bun run help` | list these commands |
 | `bun setup` | one-time: create `.venv` + install Pillow (art pipeline) |
 | `bun compile` | build firmware |
 | `bun upload` | flash firmware |
