@@ -68,21 +68,10 @@ uint32_t lastTick = 0;
 uint8_t  lastStats[4] = {255, 255, 255, 255};  // force first meter draw
 uint8_t  lastPoop = 255;                        // force first poop draw
 
-// Eating animation: an apple/glass drops into the giraffe's mouth and is eaten in
-// shrinking bites. The item travels entirely within the sky band, so it is drawn
-// INTO the band sprite (after the giraffe overlay) each frame and pushed atomically
-// — no trail, no flicker, even with a cloud overhead.
-static const int      MOUTH_X      = 160;   // giraffe mouth (screen coords)
-static const int      DROP_Y0      = 52;    // item start (above the head)
-static const int      MOUTH_Y      = 101;   // item rest (at the mouth)
-static const int      FOOD_R       = 13;
-static const uint32_t EAT_DROP_MS  = 450;
-static const uint32_t EAT_BITE_MS  = 200;
-static const int      EAT_BITES    = 3;
-static const uint32_t EAT_TOTAL    = EAT_DROP_MS + EAT_BITE_MS * EAT_BITES;
-
-enum ConsumeKind { CONSUME_APPLE, CONSUME_WATER };
-struct EatAnim { bool active = false; uint32_t start = 0; int kind = CONSUME_APPLE; };
+// Eating animation state (the composer + anchors live in anim/engine). The item
+// travels entirely within the sky band, drawn after the giraffe overlay each
+// frame and pushed atomically — no trail, no flicker, even with a cloud overhead.
+static const uint32_t EAT_TOTAL = EAT_DROP_MS + EAT_BITE_MS * EAT_BITES;  // consts from engine.h
 EatAnim eat;
 
 // Push the persistent giraffe buffer to screen. buf[0] (top-left = magenta key)
@@ -220,112 +209,17 @@ static void startEat(uint32_t now, int kind) {
   eat.start = now;
 }
 
-// Draw the current eat item (apple shrinking / glass draining) into `c` at the
-// offset (ox,oy) — (0,0) for the screen, (spriteX(),spriteY()) for the band sprite.
-static void drawEatItem(TFT_eSPI& c, int ox, int oy, uint32_t t) {
-  const bool dropping = t < EAT_DROP_MS;
-  int y = MOUTH_Y;
-  if (dropping) {                      // drop into the mouth
-    const float p = (float)t / EAT_DROP_MS;
-    y = DROP_Y0 + (int)((MOUTH_Y - DROP_Y0) * p);
-  }
-  const int step = dropping ? -1 : (int)((t - EAT_DROP_MS) / EAT_BITE_MS);  // 0..EAT_BITES-1
 
-  if (eat.kind == CONSUME_WATER) {     // glass drains in gulps
-    int fill = dropping ? 100 : 100 - (step + 1) * 100 / EAT_BITES;
-    if (fill < 0) fill = 0;
-    drawDrink(c, MOUTH_X - ox, y - oy, fill);
-  } else {                             // apple shrinks in bites
-    int r = dropping ? FOOD_R : FOOD_R - step * (FOOD_R / EAT_BITES + 1);
-    if (r < 2) r = 2;
-    drawFood(c, MOUTH_X - ox, y - oy, r);
-  }
-}
-
-// Sleep animation: "Z" glyphs drift up-and-right beside the head while sleeping.
-// Composited INTO the band (in front of the giraffe) each frame, so they need no
-// manual erase and can sit right next to the head (inside the giraffe box).
-static const int      SLEEP_X0 = 202, SLEEP_Y0 = 86;   // start (by the head, lower-left)
-static const int      SLEEP_X1 = 216, SLEEP_Y1 = 42;   // end (upper-right)
-static const uint32_t SLEEP_CYCLE_MS = 2400;
-static const int      SLEEP_ZS = 3;
-
-struct SleepAnim { bool active = false; uint32_t start = 0; };
+// Sleep + daydream STATE + scheduling (the composers + anchors live in anim/engine).
 SleepAnim slp;
-
 static void startSleep(uint32_t now) { slp.active = true; slp.start = now; }
 static void stopSleep() { slp.active = false; }
 
-// Daydream: an occasional thought bubble above the head while the giraffe is
-// idle and content — hints at what it's thinking about. Composited into the
-// band (in front of the giraffe), like the sleep Z's.
+// Daydream: an occasional thought bubble above the head while idle + content.
 static const uint32_t DAYDREAM_SHOW_MS = 3800;
 static const uint32_t DAYDREAM_GAP_MS  = 20000;    // quiet gap between daydreams
 static const int      DREAM_ICONS      = 4;
-struct DaydreamAnim { bool active = false; uint32_t start = 0; int icon = 0; uint32_t next = 8000; };
 DaydreamAnim dream;
-
-static void drawHeart(TFT_eSPI& c, int x, int y) {
-  c.fillCircle(x - 3, y - 2, 3, TFT_RED);
-  c.fillCircle(x + 3, y - 2, 3, TFT_RED);
-  c.fillTriangle(x - 6, y, x + 6, y, x, y + 8, TFT_RED);
-}
-static void drawNote(TFT_eSPI& c, int x, int y) {
-  c.fillCircle(x - 3, y + 4, 3, TFT_NAVY);
-  c.fillRect(x, y - 6, 3, 11, TFT_NAVY);
-  c.fillRect(x, y - 6, 7, 3, TFT_NAVY);
-}
-
-// Thought bubble (1.5x). It straddles the giraffe-box edge, so it's drawn in two
-// parts: the in-box part INTO the band (pushed atomically, no flicker), and the
-// open-sky part direct to the panel. DREAM_CX/CY is the cloud centre (screen).
-static const int DREAM_CX = 230, DREAM_CY = 42;
-
-static void drawDreamShape(TFT_eSPI& c, int x, int y) {
-  c.fillCircle(x,      y,      14, TFT_WHITE);        // thought cloud
-  c.fillCircle(x - 14, y + 5,   9, TFT_WHITE);
-  c.fillCircle(x + 14, y + 5,   9, TFT_WHITE);
-  c.fillCircle(x,      y + 9,   9, TFT_WHITE);
-  c.fillCircle(x - 21, y + 21,  3, TFT_WHITE);        // connector dots down-left to head
-  c.fillCircle(x - 28, y + 28,  2, TFT_WHITE);
-  switch (dream.icon) {                               // the wish
-    case 0:  drawFood(c, x, y, 8);          break;    // apple
-    case 1:  drawHeart(c, x, y);            break;
-    case 2:  drawNote(c, x, y);             break;
-    default: drawButterfly(c, x, y, true);  break;
-  }
-}
-// In-box part -> band (local coords; the sprite auto-clips to its bounds).
-static void drawDaydreamBand(TFT_eSprite& band) {
-  drawDreamShape(band, DREAM_CX - spriteX(), DREAM_CY - spriteY());
-}
-// Open-sky part -> panel, viewport-clipped to OUTSIDE the giraffe box.
-static void drawDaydreamDirect(TFT_eSPI& c) {
-  const int boxR = spriteX() + spriteW();
-  c.setViewport(boxR, 0, 320 - boxR, horizonY(), false);
-  drawDreamShape(c, DREAM_CX, DREAM_CY);
-  c.resetViewport();
-}
-static void eraseDaydream(TFT_eSPI& c) {               // only the open-sky part persists
-  const int boxR = spriteX() + spriteW();
-  restoreBg(c, boxR, DREAM_CY - 16, 320 - boxR, 52);
-}
-
-// Draw the rising Z's into the band sprite at local coords (band clips to bounds).
-static void drawSleepZ(TFT_eSPI& c, uint32_t now) {
-  c.setTextColor(TFT_NAVY);   // transparent background
-  for (int i = 0; i < SLEEP_ZS; i++) {
-    const uint32_t ph = (now - slp.start + (uint32_t)i * (SLEEP_CYCLE_MS / SLEEP_ZS)) % SLEEP_CYCLE_MS;
-    const float p = (float)ph / SLEEP_CYCLE_MS;
-    const int x = SLEEP_X0 + (int)((SLEEP_X1 - SLEEP_X0) * p) - spriteX();
-    const int y = SLEEP_Y0 + (int)((SLEEP_Y1 - SLEEP_Y0) * p) - spriteY();
-    const int s = 1 + (int)(p * 2.0f);          // grows 1 -> 3 as it rises
-    c.setTextSize(s);
-    c.setCursor(x, y);
-    c.print("Z");
-  }
-  c.setTextSize(1);   // restore so other text (meters, buttons) is normal
-}
 
 // Play animations rotate through a list on each PLAY press. Butterfly & bubbles
 // composite INTO the band (in front of the giraffe); the kite draws directly in
@@ -355,27 +249,7 @@ static void startPlay(uint32_t now) {
   s_kickPose = -1;
 }
 
-// Butterfly: a figure-8 flutter around the head, composited into the band.
-static void drawPlayButterfly(TFT_eSPI& band, uint32_t t) {
-  const float ph = (float)t / PLAY_MS[PLAY_BUTTERFLY] * 6.2832f;   // one loop
-  const int x = 160 + (int)(42.0f * sinf(ph))         - spriteX();
-  const int y = 80  + (int)(26.0f * sinf(ph * 2.0f))  - spriteY(); // figure-8
-  drawButterfly(band, x, y, ((t / 110) & 1));
-}
-
-// Bubbles: rise from the mouth, wobble, pop near the top — composited into the band.
-static void drawPlayBubbles(TFT_eSPI& band, uint32_t t) {
-  for (int i = 0; i < 4; i++) {
-    const int bt = (int)t - i * 480;                  // staggered spawn
-    if (bt < 0) continue;
-    const float life = (float)bt / 1500.0f;
-    if (life >= 1.0f) continue;                       // popped / gone
-    const int x = 160 + (int)(9.0f * sinf(bt / 180.0f + i)) - spriteX();
-    const int y = 101 - (int)(54.0f * life)                 - spriteY();
-    if (life > 0.82f) drawSparkle(band, x, y, 3, TFT_WHITE); // pop
-    else              drawBubble(band, x, y, 3 + (i & 1));
-  }
-}
+// Butterfly + bubbles play effects compose into the band via anim:: (Story 2.3).
 
 // Kite: swoops side-to-side in the open left sky (x<85) at a FIXED height that
 // keeps its erase box (y26..42) clear of the meters above and the clouds below.
@@ -695,8 +569,8 @@ void loop() {
         }
       } else {
         bool care = true;
-        if      (FEED_BTN.contains(sx, sy))  { pet.feed();  startEat(now, CONSUME_APPLE); }
-        else if (DRINK_BTN.contains(sx, sy)) { pet.drink(); startEat(now, CONSUME_WATER); }
+        if      (FEED_BTN.contains(sx, sy))  { pet.feed();  startEat(now, (int)Consume::Apple); }
+        else if (DRINK_BTN.contains(sx, sy)) { pet.drink(); startEat(now, (int)Consume::Water); }
         else if (PLAY_BTN.contains(sx, sy))  { pet.play();  startPlay(now); }
         else if (CLEAN_BTN.contains(sx, sy)) { const uint8_t n = pet.poopCount(); pet.clean(); startClean(now, n); }
         else { if (BOOK_BTN.contains(sx, sy)) pet.read(); care = false; }
@@ -770,11 +644,11 @@ void loop() {
   const bool showDream = dream.active && !eat.active && !play_.active && !cln.active && !slp.active;
   if (bandOk) {
     composeSkyBand(skyBand, giraffeBuf);
-    if (eat.active) drawEatItem(skyBand, spriteX(), spriteY(), now - eat.start);
-    if (slp.active) drawSleepZ(skyBand, now);
-    if (showDream)  drawDaydreamBand(skyBand);   // in-box part, atomic with the push
-    if (play_.active && play_.kind == PLAY_BUTTERFLY) drawPlayButterfly(skyBand, now - play_.start);
-    if (play_.active && play_.kind == PLAY_BUBBLES)   drawPlayBubbles(skyBand, now - play_.start);
+    if (eat.active) anim::composeEat(skyBand, spriteX(), spriteY(), now - eat.start, (Consume)eat.kind);
+    if (slp.active) anim::composeSleepZ(skyBand, now - slp.start);
+    if (showDream)  anim::composeDaydreamBand(skyBand, dream.icon);   // in-box part, atomic with the push
+    if (play_.active && play_.kind == PLAY_BUTTERFLY) anim::composeButterfly(skyBand, now - play_.start, PLAY_MS[PLAY_BUTTERFLY]);
+    if (play_.active && play_.kind == PLAY_BUBBLES)   anim::composeBubbles(skyBand, now - play_.start);
     if (play_.active && play_.kind == PLAY_KICK) {    // in-box ball part -> band (clips)
       int bx, by;
       kickBallPos(now - play_.start, PLAY_MS[PLAY_KICK], bx, by);
@@ -784,14 +658,14 @@ void loop() {
     skyBand.pushSprite(spriteX(), spriteY());
   } else if (eat.active) {
     pushGiraffe();
-    drawEatItem(tft, 0, 0, now - eat.start);
+    anim::composeEat(tft, 0, 0, now - eat.start, (Consume)eat.kind);
   }
 
   // Daydream bubble: the open-sky part is drawn direct (the in-box part went into
   // the band above). Erase the open-sky part when the bubble ends.
   static bool dreamDrawn = false;
-  if (showDream) { drawDaydreamDirect(tft); dreamDrawn = true; }
-  else if (dreamDrawn) { eraseDaydream(tft); dreamDrawn = false; }
+  if (showDream) { anim::composeDaydreamDirect(tft, dream.icon); dreamDrawn = true; }
+  else if (dreamDrawn) { anim::eraseDaydreamDirect(tft); dreamDrawn = false; }
 
   // Redraw the meters the instant any stat changes (action or decay).
   const uint8_t hu = pet.hunger(), th = pet.thirst(), fn = pet.fun(), hy = pet.hygiene();

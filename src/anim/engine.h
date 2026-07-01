@@ -4,6 +4,34 @@
 #include "../species/species.h"   // AnimSpec / AnimSet (played from the active descriptor)
 
 class TFT_eSprite;                 // reference-only in the header (impl includes ui.h)
+class TFT_eSPI;
+
+// --- Foreground animation state (owned by orchestration; the engine draws it) ---
+// These compose into the band IN FRONT of the pet and never touch the pose buffer
+// (AD-5). Anchors (mouth / sleep-Z / daydream) come from the active descriptor.
+enum class Consume : uint8_t { Apple, Water };
+
+// Eat timing — shared: the composers use the breakdown, the loop uses the total.
+static const uint32_t EAT_DROP_MS = 450;
+static const uint32_t EAT_BITE_MS = 200;
+static const int      EAT_BITES   = 3;
+
+struct EatAnim      { bool active = false; uint32_t start = 0; int kind = (int)Consume::Apple; };
+struct SleepAnim    { bool active = false; uint32_t start = 0; };
+struct DaydreamAnim { bool active = false; uint32_t start = 0; int icon = 0; uint32_t next = 8000; };
+
+namespace anim {
+// Foreground composers (Story 2.3) — stateless given their inputs; draw into the
+// given surface only. Used for the band (in-box) and, for eat/daydream, the
+// direct panel path (out-of-box, viewport-clipped).
+void composeEat(TFT_eSPI& c, int ox, int oy, uint32_t t, Consume kind);   // apple shrink / glass drain at the mouth
+void composeSleepZ(TFT_eSprite& band, uint32_t sinceStart);               // rising Z's beside the head
+void composeDaydreamBand(TFT_eSprite& band, int icon);                    // in-box thought bubble
+void composeDaydreamDirect(TFT_eSPI& tft, int icon);                      // open-sky thought bubble (viewport-clipped)
+void eraseDaydreamDirect(TFT_eSPI& tft);                                  // erase the open-sky part
+void composeButterfly(TFT_eSprite& band, uint32_t t, uint32_t period);    // play: figure-8 flutter
+void composeBubbles(TFT_eSprite& band, uint32_t t);                       // play: rising soap bubbles
+}
 
 // The data-driven animation engine (AD-12). Species-agnostic: it plays the
 // AnimSpecs of the active descriptor and resolves the single pose-buffer writer
@@ -33,9 +61,6 @@ public:
   // face-rotation + occasional tics, from the active descriptor's AnimSet.
   void enterIdle(uint32_t now);              // reset rotation + tic timers (on entering Happy)
   void tickIdle(uint32_t now, uint16_t* buf);// advance rotation/tics; writes buf on a frame change (one writer/frame, AD-5)
-
-  // Compose the foreground-layer AnimSpecs into the band (Story 2.3). None yet.
-  void compose(TFT_eSprite& band, uint32_t now);
 
   Emotion emotion() const { return emotion_; }
 
