@@ -134,6 +134,44 @@ def prep(src, dst, out_w, out_h, margin=0):
     _keyed_canvas(crop, out_w - 2 * margin, out_h - 2 * margin, out_w, out_h).save(dst)
 
 
+def _fit_scale(uw, uh, fit_w, fit_h):
+    lh = max(1, fit_h // PX)
+    lw = max(1, round(lh * uw / uh))
+    if lw > fit_w // PX:
+        lw = max(1, fit_w // PX)
+        lh = max(1, round(lw * uh / uw))
+    return lw, lh
+
+
+def prep_body_batch(files, out_dir, bw, bh, margin):
+    """Align all frames to a COMMON union bbox + scale + placement, so the body
+    doesn't shift between frames — only the moving part (tail/ears) changes.
+    Framing each frame independently (autocrop+center) makes the body jump."""
+    loaded, ux0, uy0, ux1, uy1 = [], 1 << 30, 1 << 30, -1, -1
+    for src in files:
+        rgba = Image.open(src).convert("RGBA")
+        rgba.putalpha(load_mask(rgba))
+        bb = rgba.getchannel("A").getbbox()
+        loaded.append((os.path.basename(src), rgba))
+        ux0, uy0 = min(ux0, bb[0]), min(uy0, bb[1])
+        ux1, uy1 = max(ux1, bb[2]), max(uy1, bb[3])
+    union = (ux0, uy0, ux1, uy1)
+    lw, lh = _fit_scale(ux1 - ux0, uy1 - uy0, bw - 2 * margin, bh - 2 * margin)
+    ox, oy = (bw - lw * PX) // 2, (bh - lh * PX) // 2
+    for name, rgba in loaded:
+        small = despeckle(rgba.crop(union).resize((lw, lh), Image.NEAREST), MIN_BLOB)
+        chunky = small.resize((lw * PX, lh * PX), Image.NEAREST)
+        canvas = Image.new("RGB", (bw, bh), MAGENTA_RGB)
+        canvas.paste(chunky, (ox, oy), chunky)
+        canvas.save(os.path.join(out_dir, name))
+
+
+def is_aligned_pose(pose):
+    """Idle/emotion poses share one frame (aligned); kick/dead are action or
+    standalone poses framed on their own."""
+    return not (pose.startswith("kick") or pose == "dead")
+
+
 def species_sources(img_dir):
     """Map species name -> (body_dir, objects_dir). Subfolders of img/ are
     species; top-level *.png (legacy giraffe) is the 'giraffe' species."""
@@ -151,17 +189,19 @@ def prep_species(name, body_dir, objects_dir, out_root):
     out_dir = os.path.join(out_root, name)
     os.makedirs(out_dir, exist_ok=True)
     bw, bh = BODY_SIZES.get(name, (W, H))
-    n = 0
+    aligned, n = [], 0
     for f in sorted(os.listdir(body_dir)):
         if not f.endswith(".png"):
             continue
         pose = f[:-4]
-        dst = os.path.join(out_dir, f)
         if pose == "icon":
-            prep(os.path.join(body_dir, f), dst, ICON_PX, ICON_PX, margin=2)
+            prep(os.path.join(body_dir, f), os.path.join(out_dir, f), ICON_PX, ICON_PX, margin=2)
+        elif is_aligned_pose(pose):
+            aligned.append(os.path.join(body_dir, f))     # batched below (common framing)
         else:
-            prep(os.path.join(body_dir, f), dst, bw, bh, margin=BODY_MARGIN)
+            prep(os.path.join(body_dir, f), os.path.join(out_dir, f), bw, bh, margin=BODY_MARGIN)
         n += 1
+    prep_body_batch(aligned, out_dir, bw, bh, BODY_MARGIN)
     if os.path.isdir(objects_dir):
         for f in sorted(os.listdir(objects_dir)):
             if not f.endswith(".png"):

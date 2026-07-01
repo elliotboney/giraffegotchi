@@ -253,13 +253,14 @@ static void animateCritters(TFT_eSPI& tft) {
     const int nx = (int)((s_phase / 45) % 360) - 20;
     const int ny = 130 + (int)(8.0f * sinf(s_phase / 260.0f));
     if (nx != s_flutterX || ny != s_flutterY) {
+      // erase box must cover the full wingspan (x +/-14) or the wing tips trail
       if (s_flutterX > -900 && !flutterInBox(s_flutterX))
-        restoreBg(tft, s_flutterX - 8, s_flutterY - 8, 18, 18);
+        restoreBg(tft, s_flutterX - 15, s_flutterY - 9, 31, 20);
       if (!flutterInBox(nx)) drawButterfly(tft, nx, ny, (s_phase / 120) & 1);
       s_flutterX = nx; s_flutterY = ny;
     }
   } else if (s_flutterX > -900) {                 // leaving day → clean up
-    if (!flutterInBox(s_flutterX)) restoreBg(tft, s_flutterX - 8, s_flutterY - 8, 18, 18);
+    if (!flutterInBox(s_flutterX)) restoreBg(tft, s_flutterX - 15, s_flutterY - 9, 31, 20);
     s_flutterX = -999;
   }
 }
