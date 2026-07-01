@@ -169,18 +169,28 @@ void anim::composeDaydreamBand(TFT_eSprite& band, int icon) {
   drawDreamShape(band, a.dreamCx - spriteX(), a.dreamCy - spriteY(), icon);
 }
 
+// The band only covers the pet footprint (y >= spriteY), so the bubble's top
+// rows would be clipped. Draw the two parts the band can't: the open sky to the
+// RIGHT of the pet (full height), and the strip ABOVE the band over the pet's
+// x-range (below the meter row).
+static const int DREAM_TOP_Y = 24;   // just below the meter labels
+
 void anim::composeDaydreamDirect(TFT_eSPI& c, int icon) {
   const SpeciesAnchors& a = activeSpecies().anchors;
   const int boxR = spriteX() + spriteW();
-  c.setViewport(boxR, 0, 320 - boxR, horizonY(), false);
+  c.setViewport(boxR, 0, 320 - boxR, horizonY(), false);            // right of the pet
+  drawDreamShape(c, a.dreamCx, a.dreamCy, icon);
+  c.resetViewport();
+  c.setViewport(spriteX(), DREAM_TOP_Y, boxR - spriteX(), spriteY() - DREAM_TOP_Y, false);  // above the band
   drawDreamShape(c, a.dreamCx, a.dreamCy, icon);
   c.resetViewport();
 }
 
-void anim::eraseDaydreamDirect(TFT_eSPI& c) {          // only the open-sky part persists
+void anim::eraseDaydreamDirect(TFT_eSPI& c) {          // erase both direct parts
   const SpeciesAnchors& a = activeSpecies().anchors;
   const int boxR = spriteX() + spriteW();
-  restoreBg(c, boxR, a.dreamCy - 16, 320 - boxR, 52);
+  restoreBg(c, boxR, a.dreamCy - 16, 320 - boxR, 52);                          // right open-sky
+  restoreBg(c, spriteX(), DREAM_TOP_Y, boxR - spriteX(), spriteY() - DREAM_TOP_Y);  // above-band strip
 }
 
 void anim::composeButterfly(TFT_eSprite& band, uint32_t t, uint32_t period) {

@@ -155,6 +155,11 @@ static void eraseCloud(TFT_eSPI& tft, int x, int y) {
   if (l1 > l0) restoreBg(tft, l0, y - 3, l1 - l0, 16);
   const int r0 = max(x - 4, boxR()), r1 = x + 40;
   if (r1 > r0) restoreBg(tft, r0, y - 3, r1 - r0, 16);
+  // If this erase box overlaps the sun/moon, force it to repaint — it otherwise
+  // only redraws when it MOVES, so a passing cloud would leave a bite cleared
+  // out of it until the next arc step.
+  int cbx, cby, cbw, cbh; celestialBox(s_celX, s_celY, cbx, cby, cbw, cbh);
+  if (overlap(x - 4, y - 3, 44, 16, cbx, cby, cbw, cbh)) s_celForce = true;
 }
 
 static void drawBird(TFT_eSPI& tft, int x, int y, bool up) {
@@ -490,7 +495,9 @@ bool renderPoseToBuffer(uint16_t* dst, const char* pose, int w) {
 }
 
 static void drawMeter(TFT_eSPI& tft, int cellX, uint8_t value, uint16_t color, const char* label) {
-  const int y = 8, bx = cellX + 14, bw = 58, bh = 12, by = y + 2;
+  // bh halved (12 -> 6) for a slimmer status bar; by nudged so the thinner bar
+  // stays vertically centred against the FONT2 label.
+  const int y = 8, bx = cellX + 14, bw = 58, bh = 6, by = y + 5;
   tft.setTextColor(TFT_WHITE, BG_COLOR);
   tft.setTextDatum(TL_DATUM);
   tft.drawString(label, cellX, y, 2);
