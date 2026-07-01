@@ -441,6 +441,59 @@ static void wakeScreen(uint32_t now) {
   if (s_dimmed) { backlight(BL_FULL); s_dimmed = false; }
 }
 
+// --- runtime species swap (AD-13) ---
+static int s_pendingSwap = -1;   // latched swap request (registry index); applied atop loop()
+
+// (Re)load the beach-ball sprite for the ACTIVE species (kick prop). ballOk stays
+// false if the species has no ball. Used at boot and after a swap.
+static void reloadBall() {
+  ballOk = false;
+  if (ballSpr.created()) ballSpr.deleteSprite();
+  uint16_t* tmp = (uint16_t*)malloc(BALL_PX * BALL_PX * sizeof(uint16_t));
+  if (tmp && renderPoseToBuffer(tmp, "beach_ball", BALL_PX) && ballSpr.createSprite(BALL_PX, BALL_PX)) {
+    ballSpr.setSwapBytes(true);
+    ballSpr.pushImage(0, 0, BALL_PX, BALL_PX, tmp);   // byte-swaps into the sprite's native order
+    ballSpr.setPivot(BALL_PX / 2, BALL_PX / 2);
+    ballOk = true;
+  }
+  if (tmp) free(tmp);
+}
+
+// Apply a latched species swap as ONE atomic sequence (AD-13). Only ever called
+// from the top of loop(), never inline mid-frame, so no frame straddles two
+// species. Care stats are NOT touched (FR12; per-animal state is Story 4.2).
+static void applySpeciesSwap(int idx) {
+  if (idx < 0 || idx >= speciesCount() || idx == activeSpeciesIndex()) return;
+  const int prevIdx = activeSpeciesIndex();
+
+  // 1. cancel every in-flight animation + reset pose ownership
+  eat.active = play_.active = cln.active = slp.active = dream.active = false;
+  s_kickPose = -1;
+
+  // 2. switch species, then size the pose buffer to the new geometry. Build the
+  //    new buffer BEFORE freeing the old — an alloc failure keeps the current
+  //    species (fail-safe) rather than crashing.
+  setActiveSpecies(idx);
+  uint16_t* nb = (uint16_t*)malloc(spriteW() * spriteH() * sizeof(uint16_t));
+  if (!nb) { setActiveSpecies(prevIdx); Serial.println("[swap] alloc failed — kept current"); return; }
+  free(giraffeBuf); giraffeBuf = nb;
+  skyBand.deleteSprite();
+  bandOk = (skyBand.createSprite(spriteW(), bandH()) != nullptr);
+
+  // 3. decode the new species' sprites (pose buffer + ball) and reset anim state
+  reloadBall();
+  if (s_dead) renderPoseToBuffer(giraffeBuf, "dead");
+  else        engine.forcePose(pet.emotion(), giraffeBuf);
+  engine.enterIdle(millis());     // reset idle rotation/tic indices to the new anim set
+
+  // 4. refresh the palette from the NEW biome at the current phase, then a full-
+  //    screen repaint — clears any out-of-box element (a ball in flight leaves no
+  //    orphan) and paints the new world.
+  setSkyPhase(currentSkyPhase());
+  repaintScene();
+  Serial.printf("[swap] now %s\n", activeSpecies().name);
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -482,14 +535,7 @@ void setup() {
   engine.start(millis());
   if (s_dead) { renderPoseToBuffer(giraffeBuf, "dead"); pushGiraffe(); }
   else        updateGiraffe(pet.emotion());
-  uint16_t* tmp = (uint16_t*)malloc(BALL_PX * BALL_PX * sizeof(uint16_t));
-  if (tmp && renderPoseToBuffer(tmp, "beach_ball", BALL_PX) && ballSpr.createSprite(BALL_PX, BALL_PX)) {
-    ballSpr.setSwapBytes(true);
-    ballSpr.pushImage(0, 0, BALL_PX, BALL_PX, tmp);   // byte-swaps into the sprite's native order
-    ballSpr.setPivot(BALL_PX / 2, BALL_PX / 2);
-    ballOk = true;
-  }
-  if (tmp) free(tmp);
+  reloadBall();                   // beach-ball prop for the active species
   drawButtons(tft);
   drawMeters(tft, pet.hunger(), pet.thirst(), pet.fun(), pet.hygiene());
   drawPoops(tft, pet.poopCount());
@@ -529,6 +575,19 @@ static void revive() {
 
 void loop() {
   const uint32_t now = millis();
+
+  // Apply a latched species swap at exactly ONE point — the top of loop(), before
+  // pet.update() and any animation tick (AD-13), so no frame straddles two species.
+  if (s_pendingSwap >= 0) { applySpeciesSwap(s_pendingSwap); s_pendingSwap = -1; }
+
+  // Dev-only serial swap trigger (removed/gated in Story 4.4): 's' cycles species,
+  // 'g'/'h' pick giraffe/groundhog.
+  while (Serial.available()) {
+    const int c = Serial.read();
+    if      (c == 's') s_pendingSwap = (activeSpeciesIndex() + 1) % speciesCount();
+    else if (c == 'g') s_pendingSwap = findSpecies("giraffe");
+    else if (c == 'h') s_pendingSwap = findSpecies("groundhog");
+  }
 
   if (!s_dead) pet.update(now - lastTick);   // frozen while dead
   lastTick = now;
