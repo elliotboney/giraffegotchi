@@ -18,6 +18,20 @@ static const AnimSet GIR_ANIMS = {
   /* tics */ GIR_TICS, 3,
 };
 
+// The savanna — the giraffe's biome (AD-15). Palette table is the frozen
+// pre-refactor PALETTES[8] (baseline §3.4), indexed by SkyPhase. Scene props
+// (grass/trees/stars/critters) join this in Story 3.2.
+static const Biome SAVANNA = {
+  { /* NIGHT     */ {0x0865, 0x2104},   // deep navy
+    /* DAWN      */ {0x39ED, 0x2966},   // cool blue-violet, first light
+    /* SUNRISE   */ {0xFC6D, 0x92E9},   // pink-orange
+    /* MORNING   */ {0xE671, 0xBD2B},   // soft warm gold
+    /* DAY       */ {0x6DBC, 0xCD4B},   // bright blue (original)
+    /* AFTERNOON */ {0xF64F, 0xCD0A},   // warm gold
+    /* SUNSET    */ {0xE36B, 0x6A25},   // deep orange
+    /* DUSK      */ {0x5A2F, 0x2947} }, // purple
+};
+
 // The giraffe as DATA — the reference species entry. Values are the frozen
 // pre-refactor literals (Story 1.1 baseline §3.1/§3.3): geometry 150x160 at
 // (85,34), horizon 165; anchors for mouth/sleep/daydream. Asset paths resolve
@@ -31,7 +45,7 @@ extern const Species GIRAFFE = {   // `extern` for external linkage (const is in
   /* anchors */ { 160, 101, 52, 202, 86, 216, 42, 230, 42 },
   /* caps    */ CAP_KITE | CAP_KICK,   // the giraffe's signature play moves
   /* anims   */ &GIR_ANIMS,
-  /* biome   */ nullptr,
+  /* biome   */ &SAVANNA,
   /* food    */ nullptr,
   /* icon    */ nullptr,
 };

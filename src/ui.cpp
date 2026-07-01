@@ -19,20 +19,9 @@ static const int TREE_LX = 22, TREE_RX = 298, TREE_BASEY = 172;
 uint16_t SKY_COLOR    = 0x6DBC;
 uint16_t GROUND_COLOR = 0xCD4B;
 
-// One sky/ground colour per phase (index matches enum SkyPhase). Warm at the
-// edges of the day (sunrise/morning, afternoon/sunset), cool blue at midday,
-// deep navy at night.
-struct SkyColors { uint16_t sky, ground; };
-static const SkyColors PALETTES[8] = {
-  /* NIGHT     */ {0x0865, 0x2104},   // deep navy
-  /* DAWN      */ {0x39ED, 0x2966},   // cool blue-violet, first light
-  /* SUNRISE   */ {0xFC6D, 0x92E9},   // pink-orange
-  /* MORNING   */ {0xE671, 0xBD2B},   // soft warm gold
-  /* DAY       */ {0x6DBC, 0xCD4B},   // bright blue (original)
-  /* AFTERNOON */ {0xF64F, 0xCD0A},   // warm gold
-  /* SUNSET    */ {0xE36B, 0x6A25},   // deep orange
-  /* DUSK      */ {0x5A2F, 0x2947},   // purple
-};
+// The per-phase sky/ground palette is now DATA in the active biome (AD-15);
+// setSkyPhase indexes activeSpecies().biome->palette. render/scene stays the sole
+// writer of the live SKY_COLOR/GROUND_COLOR + phase id (AD-10).
 static SkyPhase s_phaseId = PHASE_DAY;
 
 // Celestial body, positioned each tick by main along an arc (setCelestial).
@@ -631,10 +620,10 @@ void drawPoops(TFT_eSPI& tft, uint8_t count) {
 
 // --- day/night cycle ---
 void setSkyPhase(SkyPhase p) {
-  s_phaseId    = p;
-  SKY_COLOR    = PALETTES[p].sky;
-  GROUND_COLOR = PALETTES[p].ground;
-  s_celForce   = true;   // a phase repaint wipes the sky → redraw the sun/moon
+  s_phaseId = p;
+  const Biome* b = activeSpecies().biome;   // palette table travels with the species (AD-15)
+  if (b) { SKY_COLOR = b->palette[p].sky; GROUND_COLOR = b->palette[p].ground; }
+  s_celForce = true;        // a phase repaint wipes the sky → redraw the sun/moon
 }
 
 SkyPhase currentSkyPhase() { return s_phaseId; }

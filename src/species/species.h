@@ -60,9 +60,14 @@ struct FoodItem {
   int w, h;             // sprite dimensions
 };
 
-// Populated by a later epic — forward-declared so the descriptor can carry the
-// field now (structure only, no behavior). Null until Epic 3.
-struct Biome;      // Epic 3: world palettes / props / critters
+// --- Biome data (AD-15) — the world a species lives in ---
+// The biome owns the sky/ground palette TABLE (data); render/scene stays the sole
+// writer of the live SKY_COLOR/GROUND_COLOR + phase id (AD-10) and indexes this
+// table. Scene props (grass / trees / stars / critters) migrate here in Story 3.2.
+struct SkyColors { uint16_t sky, ground; };
+struct Biome {
+  SkyColors palette[8];   // per-phase sky/ground, indexed by SkyPhase (NIGHT..DUSK)
+};
 
 struct Species {
   const char* name;         // lowercase display name ("giraffe")
