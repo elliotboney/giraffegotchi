@@ -29,6 +29,11 @@ public:
   // even if the emotion is unchanged (e.g. a kick pose is sitting in it).
   void forcePose(Emotion e, uint16_t* buf);
 
+  // Idle pose overlays (played while the base emotion is Happy): the content
+  // face-rotation + occasional tics, from the active descriptor's AnimSet.
+  void enterIdle(uint32_t now);              // reset rotation + tic timers (on entering Happy)
+  void tickIdle(uint32_t now, uint16_t* buf);// advance rotation/tics; writes buf on a frame change (one writer/frame, AD-5)
+
   // Compose the foreground-layer AnimSpecs into the band (Story 2.3). None yet.
   void compose(TFT_eSprite& band, uint32_t now);
 
@@ -38,6 +43,16 @@ private:
   Emotion  emotion_ = Emotion::Happy;
   bool     loaded_  = false;   // is emotion_ currently decoded into the buffer?
   uint32_t started_ = 0;
+
+  // Idle overlay state — defaults mirror the pre-refactor globals so boot timing
+  // is identical (rotation advances immediately, first tic at 5 s).
+  int      rotIdx_      = 0;
+  uint32_t rotNext_     = 0;
+  bool     ticActive_   = false;
+  int      ticKind_     = 0;
+  int      ticIdx_      = 0;
+  uint32_t ticStepNext_ = 0;
+  uint32_t ticNext_     = 5000;
 };
 
 }  // namespace anim

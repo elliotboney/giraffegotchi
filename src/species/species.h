@@ -41,8 +41,10 @@ struct AnimSpec {
 };
 
 struct AnimSet {
-  const AnimSpec* specs;       // the species' animations
-  uint8_t n;
+  AnimSpec        idle;        // content-state pose rotation (played while Happy), variable length
+  const AnimSpec* tics;        // idle tics interjected during the idle state (each variable length)
+  uint8_t         ticN;
+  // foreground specs (eat / sleep-Z / daydream / play) arrive in Story 2.3
 };
 
 // Populated by later epics — forward-declared so the descriptor can carry the

@@ -209,34 +209,8 @@ static void updateDayNight(bool force) {
   }
 }
 
-// Alternate happy faces cycled on a timer so the idle face isn't static. Loading
-// a new frame into giraffeBuf is enough — the band composites it next push.
-static const char* HAPPY_FRAMES[] = {"happy", "happy2", "happy3"};
-static const int      HAPPY_FRAME_N  = 3;
-static const uint32_t HAPPY_FRAME_MS = 3500;
-static int      s_happyIdx  = 0;
-static uint32_t s_happyNext = 0;
-
-// Idle tics: short sprite sequences that play every few seconds while content,
-// layered over the happy-face rotation, then return to the current happy frame.
-//   blink:  open -> blink -> blink2(closed) -> blink3(opening) -> open
-//   ears:   perk up -> down -> back
-//   tail:   swish to the left -> back
-static const char* BLINK_FR[] = {"blink", "blink2", "blink3"};
-static const char* EARS_FR[]  = {"ears_up", "ears_down"};
-static const char* TAIL_FR[]  = {"tail_left"};
-struct Tic { const char* const* frames; int n; uint32_t holdMs; };
-static const Tic TICS[] = {
-  {BLINK_FR, 3, 90},
-  {EARS_FR,  2, 150},
-  {TAIL_FR,  1, 220},
-};
-static const int TIC_N = 3;
-static bool     s_ticActive   = false;
-static int      s_ticKind     = 0;
-static int      s_ticIdx      = 0;
-static uint32_t s_ticStepNext = 0;
-static uint32_t s_ticNext     = 5000;          // next tic start time
+// Happy-face rotation + idle tics (blink/ears/tail) are now DATA in the giraffe
+// descriptor (species/giraffe.cpp) and played by anim::Engine (enterIdle/tickIdle).
 
 static void startEat(uint32_t now, int kind) {
   eat.kind = kind;
@@ -759,37 +733,12 @@ void loop() {
       if (slp.active) stopSleep();   // clear Z's before switching sprite
       updateGiraffe(e);              // loads happy.png (frame 0) when entering happy
       drawButtons(tft);
-      if (e == Emotion::Happy) {
-        s_happyIdx = 0; s_happyNext = now + HAPPY_FRAME_MS;
-        s_ticActive = false; s_ticNext = now + 4000;
-      }
+      if (e == Emotion::Happy) engine.enterIdle(now);  // reset rotation + tic timers
     }
-    // While happy: play an occasional idle tic; otherwise rotate the faces.
-    if (e == Emotion::Happy) {
-      if (s_ticActive) {                           // step through the tic's frames
-        const Tic& t = TICS[s_ticKind];
-        if (now >= s_ticStepNext) {
-          s_ticIdx++;
-          if (s_ticIdx < t.n) {
-            renderPoseToBuffer(giraffeBuf, t.frames[s_ticIdx]);
-            s_ticStepNext = now + t.holdMs;
-          } else {                                 // tic done -> current happy face
-            s_ticActive = false;
-            renderPoseToBuffer(giraffeBuf, HAPPY_FRAMES[s_happyIdx]);
-            s_ticNext = now + 3500 + (now % 5000); // 3.5–8.5 s until the next tic
-          }
-        }
-      } else if (now >= s_ticNext) {               // start the next tic (cycles kinds)
-        s_ticKind = (s_ticKind + 1) % TIC_N;
-        s_ticActive = true; s_ticIdx = 0;
-        renderPoseToBuffer(giraffeBuf, TICS[s_ticKind].frames[0]);
-        s_ticStepNext = now + TICS[s_ticKind].holdMs;
-      } else if (now >= s_happyNext) {             // idle face rotation
-        s_happyIdx = (s_happyIdx + 1) % HAPPY_FRAME_N;
-        renderPoseToBuffer(giraffeBuf, HAPPY_FRAMES[s_happyIdx]);
-        s_happyNext = now + HAPPY_FRAME_MS;
-      }
-    }
+    // While happy: the engine plays the idle rotation + occasional tics (data-driven,
+    // one pose-writer per frame). No-op for any other emotion.
+    engine.tickIdle(now, giraffeBuf);
+
     // Sleep state (Z's are drawn into the band below while active).
     if (e == Emotion::Sleepy) {
       if (!slp.active) startSleep(now);
