@@ -9,8 +9,10 @@ groundhog.
 
 - `bun compile` — build · `bun upload` — flash firmware · `bun uploadfs` — flash sprites (`data/`)
 - `bun flash` — firmware + sprites · `bun native` — 43 unit tests · `bun monitor` — serial
-- `bun prep [species]` — art pipeline (`img/<sp>/` → `data/<sp>/`) · `bun setup` — one-time `.venv`+Pillow
+- `bun run cleanart <sp>` — prep raw art in `img/<sp>/` (bg-remove + align frames; `.backups/` + `cleanart:revert`)
+- `bun prep [species]` — sprite conversion (`img/<sp>/` → `data/<sp>/`) · `bun setup` — one-time `.venv`+Pillow+numpy
 - Rule: `bun upload` for code changes; `bun flash`/`uploadfs` when `data/` sprites changed.
+- Art flow: raw art → `cleanart` (clean transparent source) → `prep` (sprites). `docs/PET_PROMPT.md` = the generation prompt.
 
 ## Architecture (layered, one-way: `main → {render, anim, species, core} → hw`)
 
@@ -26,9 +28,9 @@ gotchas: `docs/STATUS.md`. Plan of record: `_bmad-output/planning-artifacts/` (s
 
 ## Adding an animal
 
-Data + art, **no engine changes**. Drop `img/<name>/` transparent art → `bun prep <name>` →
-add `src/species/<name>.cpp` (copy `groundhog.cpp`) → register in `registry.cpp` → `bun flash`.
-Full steps: README "Adding an animal".
+Data + art, **no engine changes**. Generate art (`docs/PET_PROMPT.md`) into `img/<name>/` →
+`bun run cleanart <name>` (clean+align) → `bun prep <name>` → add `src/species/<name>.cpp`
+(copy `groundhog.cpp`) → register in `registry.cpp` → `bun flash`. Full steps: README "Adding an animal".
 
 ## Invariants / gotchas (these bite — don't relearn them)
 

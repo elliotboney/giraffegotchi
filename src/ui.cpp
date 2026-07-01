@@ -481,8 +481,9 @@ bool renderPoseToBuffer(uint16_t* dst, const char* pose, int w) {
 
 static void drawMeter(TFT_eSPI& tft, int cellX, uint8_t value, uint16_t color, const char* label) {
   // bh halved (12 -> 6) for a slimmer status bar; by nudged so the thinner bar
-  // stays vertically centred against the FONT2 label.
-  const int y = 8, bx = cellX + 14, bw = 58, bh = 6, by = y + 5;
+  // stays vertically centred against the FONT2 label. y raised 8 -> 2 (up half the
+  // old bar height) so the slimmer group hugs the top, clear of the pet.
+  const int y = 2, bx = cellX + 14, bw = 58, bh = 6, by = y + 5;
   tft.setTextColor(TFT_WHITE, BG_COLOR);
   tft.setTextDatum(TL_DATUM);
   tft.drawString(label, cellX, y, 2);

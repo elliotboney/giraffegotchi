@@ -67,7 +67,7 @@ extern const Species GIRAFFE = {   // `extern` for external linkage (const is in
   "george",
   "/giraffe",
   /* geom    */ { 150, 160, 85, 34, 165 },
-  /* anchors */ { 160, 101, 52, 202, 86, 216, 42, 230, 42 },
+  /* anchors */ { 155, 101, 52, 202, 86, 216, 42, 230, 42 },
   /* caps    */ CAP_KITE | CAP_KICK,   // the giraffe's signature play moves
   /* anims   */ &GIR_ANIMS,
   /* biome   */ &SAVANNA,

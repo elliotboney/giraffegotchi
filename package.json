@@ -3,7 +3,9 @@
   "private": true,
   "scripts": {
     "help": "printf '\\n  giraffegotchi commands\\n\\n  bun setup       one-time: create .venv + install Pillow (art pipeline)\\n  bun compile     build firmware (esp32dev)\\n  bun upload      flash firmware\\n  bun uploadfs    flash sprites (data/) to LittleFS\\n  bun flash       firmware + sprites\\n  bun native      run the unit tests (43, host-native)\\n  bun monitor     serial monitor\\n  bun prep [sp]   process art (all species, or one: bun prep giraffe)\\n  bun run help    this list\\n\\n'",
-    "setup": "python3.12 -m venv .venv && .venv/bin/pip install -q --upgrade pip Pillow",
+    "setup": "python3.12 -m venv .venv && .venv/bin/pip install -q --upgrade pip Pillow numpy",
+    "cleanart": ".venv/bin/python tools/clean_art.py",
+    "cleanart:revert": ".venv/bin/python tools/clean_art.py --revert",
     "compile": "pio run -e esp32dev",
     "upload": "pio run -e esp32dev -t upload",
     "uploadfs": "pio run -e esp32dev -t uploadfs",

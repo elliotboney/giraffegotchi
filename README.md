@@ -62,20 +62,40 @@ Requires [PlatformIO](https://platformio.org/) (`pio`) and, for the art pipeline
 | Command | What |
 |---|---|
 | `bun run help` | list these commands |
-| `bun setup` | one-time: create `.venv` + install Pillow (art pipeline) |
+| `bun setup` | one-time: create `.venv` + install Pillow + numpy (art pipeline) |
 | `bun compile` | build firmware |
 | `bun upload` | flash firmware |
 | `bun uploadfs` | flash sprites (`data/`) to LittleFS |
 | `bun flash` | firmware **+** sprites |
 | `bun native` | run the pet-logic unit tests (43, host-native) |
 | `bun monitor` | serial monitor |
+| `bun run cleanart <name>` | clean raw source art in `img/<name>/` (bg-remove + align frames) |
+| `bun run cleanart:revert <name>` | restore originals from `img/<name>/.backups/` |
 | `bun prep [name]` | process art (all species, or one: `bun prep giraffe`) |
 
 Rule of thumb: **`bun upload`** for code-only changes; **`bun flash`** (or add `bun uploadfs`) whenever sprites in `data/` changed. Raw equivalents are plain `pio run -e esp32dev -t <target>`.
 
 ## Art pipeline
 
-Animals are illustrated art, not procedural. Source PNGs are **transparent-background** and live in per-species folders; `tools/prep_sprite.py` keys the transparent pixels to magenta (the firmware's transparency color), autocrops, aligns frames to a common box (so the body doesn't jump between poses), downsamples, and writes the `data/<species>/` sprites shipped to LittleFS. It also reports the LittleFS budget and fails if over.
+Animals are illustrated art, not procedural. Two stages: **`cleanart`** preps raw generated art into clean transparent source, then **`prep`** converts that source into shipped sprites.
+
+```
+raw art  ──cleanart──►  img/<species>/*.png (clean, transparent)  ──prep──►  data/<species>/*.png (sprites)
+```
+
+### 1. `cleanart` — prep the raw art (`tools/clean_art.py`)
+
+LLM-generated frames arrive with a background to strip and a few pixels of drift between frames. `bun run cleanart <species>` fixes both, **in place** in `img/<species>/`:
+
+- **Background → true transparent PNG.** A border-connected flood fill keys the flat light background (incl. ChatGPT's fake-transparent white/gray checkerboard) but stops at the hard black outline — so interior pink can't hole through and interior light areas (book pages) stay. Not ML; deterministic.
+- **Frame registration.** Body poses are aligned to a reference by the shift that maximizes silhouette overlap (FFT cross-correlation), so the body doesn't drift between frames and you can copy a part from one frame onto another cleanly.
+- **Backups + revert.** Originals go to `img/<species>/.backups/`; `bun run cleanart:revert <species>` restores them. `dead`, `icon`, and `kick*` are background-removed but not nudged; `objects/` are background-removed only.
+
+Tune barriers/margins at the top of `tools/clean_art.py` (`OUTLINE_DARK`, `FLOOD_SAT`, `MARGIN`, `REF_POSE`).
+
+### 2. `prep` — convert to sprites (`tools/prep_sprite.py`)
+
+`tools/prep_sprite.py` keys the transparent pixels to magenta (the firmware's transparency color), autocrops, aligns frames to a common box, downsamples, and writes the `data/<species>/` sprites shipped to LittleFS. It reports the LittleFS budget and fails if over.
 
 ```
 img/<species>/*.png            body poses      -> data/<species>/<pose>.png
@@ -87,13 +107,47 @@ Run `bun prep` (all) or `bun prep <species>` (one), then `bun uploadfs`.
 
 ## Adding an animal
 
-An animal is **data + art** — no engine changes (that's the whole point of the refactor). To add one, say a flamingo:
+An animal is **data + art** — no engine changes (that's the whole point of the refactor). The full pose set looks like this (flamingo — click any thumbnail for the full-size image):
 
-1. **Art** → `img/flamingo/` (transparent PNGs): the pose set (`happy`, `happy2`, `hungry`, `sad`, `excited`, `sleepy`, `sick`, `reading`, `thirsty`, `bored`, `dirty`, `dead`, `blink`, `ears_up`, `ears_down`, `tail_left`, plus any signature-move poses), `icon.png`, and `objects/food.png`. Reuse the giraffe/groundhog sets as a naming reference.
-2. **Prep** → `bun prep flamingo` (keys + aligns + reports budget) → `data/flamingo/`.
-3. **Descriptor** → add `src/species/flamingo.cpp`: a `Species` (name, `displayName`, `assetFolder`, `geom`, `anchors`, `caps`, `anims`, `biome`, optional `food`, `icon`) plus its `AnimSet` and a `Biome`. Copy `groundhog.cpp` and edit the values — geometry `W/H/X/Y`, anchor points, the pose-name frame lists, the 8-phase palette, grass/stars/fireflies, and (optional) tree hook.
-4. **Register** → add `extern const Species FLAMINGO;` and `&FLAMINGO` to the `SPECIES[]` list in `src/species/registry.cpp`.
-5. **Build + flash** → `bun native && bun flash`. Hold BOOK → the flamingo tile appears in the picker.
+<table>
+<tr>
+<td align="center"><a href="img/flamingo/happy.png"><img src="docs/poses/flamingo/happy.png" width="100" alt="happy"></a><br><code>happy</code></td>
+<td align="center"><a href="img/flamingo/happy2.png"><img src="docs/poses/flamingo/happy2.png" width="100" alt="happy2"></a><br><code>happy2</code></td>
+<td align="center"><a href="img/flamingo/happy3.png"><img src="docs/poses/flamingo/happy3.png" width="100" alt="happy3"></a><br><code>happy3</code></td>
+<td align="center"><a href="img/flamingo/excited.png"><img src="docs/poses/flamingo/excited.png" width="100" alt="excited"></a><br><code>excited</code></td>
+<td align="center"><a href="img/flamingo/reading.png"><img src="docs/poses/flamingo/reading.png" width="100" alt="reading"></a><br><code>reading</code></td>
+</tr>
+<tr>
+<td align="center"><a href="img/flamingo/hungry.png"><img src="docs/poses/flamingo/hungry.png" width="100" alt="hungry"></a><br><code>hungry</code></td>
+<td align="center"><a href="img/flamingo/thirsty.png"><img src="docs/poses/flamingo/thirsty.png" width="100" alt="thirsty"></a><br><code>thirsty</code></td>
+<td align="center"><a href="img/flamingo/sad.png"><img src="docs/poses/flamingo/sad.png" width="100" alt="sad"></a><br><code>sad</code></td>
+<td align="center"><a href="img/flamingo/sick.png"><img src="docs/poses/flamingo/sick.png" width="100" alt="sick"></a><br><code>sick</code></td>
+<td align="center"><a href="img/flamingo/sleepy.png"><img src="docs/poses/flamingo/sleepy.png" width="100" alt="sleepy"></a><br><code>sleepy</code></td>
+</tr>
+<tr>
+<td align="center"><a href="img/flamingo/bored.png"><img src="docs/poses/flamingo/bored.png" width="100" alt="bored"></a><br><code>bored</code></td>
+<td align="center"><a href="img/flamingo/dirty.png"><img src="docs/poses/flamingo/dirty.png" width="100" alt="dirty"></a><br><code>dirty</code></td>
+<td align="center"><a href="img/flamingo/blink.png"><img src="docs/poses/flamingo/blink.png" width="100" alt="blink"></a><br><code>blink</code></td>
+<td align="center"><a href="img/flamingo/ears_up.png"><img src="docs/poses/flamingo/ears_up.png" width="100" alt="ears_up"></a><br><code>ears_up</code></td>
+<td align="center"><a href="img/flamingo/ears_down.png"><img src="docs/poses/flamingo/ears_down.png" width="100" alt="ears_down"></a><br><code>ears_down</code></td>
+</tr>
+<tr>
+<td align="center"><a href="img/flamingo/tail_left.png"><img src="docs/poses/flamingo/tail_left.png" width="100" alt="tail_left"></a><br><code>tail_left</code></td>
+<td align="center"><a href="img/flamingo/kick.png"><img src="docs/poses/flamingo/kick.png" width="100" alt="kick"></a><br><code>kick</code></td>
+<td align="center"><a href="img/flamingo/kick2.png"><img src="docs/poses/flamingo/kick2.png" width="100" alt="kick2"></a><br><code>kick2</code></td>
+<td align="center"><a href="img/flamingo/dead.png"><img src="docs/poses/flamingo/dead.png" width="100" alt="dead"></a><br><code>dead</code></td>
+<td align="center"><a href="img/flamingo/icon.png"><img src="docs/poses/flamingo/icon.png" width="100" alt="icon"></a><br><code>icon</code></td>
+</tr>
+</table>
+
+To add one, say a flamingo:
+
+1. **Generate art** → use [`docs/PET_PROMPT.md`](docs/PET_PROMPT.md): fill its two `{{...}}` slots (animal + look) and paste it into ChatGPT to produce the 19 poses (`happy`, `happy2`, `hungry`, `sad`, `excited`, `sleepy`, `sick`, `reading`, `thirsty`, `bored`, `dirty`, `dead`, `blink`, `ears_up`, `ears_down`, `tail_left`, plus any signature-move poses), the `icon`, and an optional `food` item. Save them into `img/flamingo/` (props/food under `img/flamingo/objects/`).
+2. **Clean** → `bun run cleanart flamingo` (bg-remove + align frames; originals backed up to `img/flamingo/.backups/`, revert with `bun run cleanart:revert flamingo`).
+3. **Prep** → `bun prep flamingo` (keys + aligns + reports budget) → `data/flamingo/`.
+4. **Descriptor** → add `src/species/flamingo.cpp`: a `Species` (name, `displayName`, `assetFolder`, `geom`, `anchors`, `caps`, `anims`, `biome`, optional `food`, `icon`) plus its `AnimSet` and a `Biome`. Copy `groundhog.cpp` and edit the values — geometry `W/H/X/Y`, anchor points, the pose-name frame lists, the 8-phase palette, grass/stars/fireflies, and (optional) tree hook.
+5. **Register** → add `extern const Species FLAMINGO;` and `&FLAMINGO` to the `SPECIES[]` list in `src/species/registry.cpp`.
+6. **Build + flash** → `bun native && bun flash`. Hold BOOK → the flamingo tile appears in the picker.
 
 Notes: `displayName` is the picker label (the pet's given name, e.g. `"frances"`) and is separate from the internal `name` used for the asset folder + save id. Signature moves (kick/kite) are opt-in `Capability` flags; a species that omits them just doesn't run that code. The pose buffer is sized to the largest species automatically, so a bigger animal is fine.
 
@@ -110,7 +164,7 @@ Layered, one-way dependencies (`main → {render, anim, species, core} → hardw
 | `src/io/` → `save.{h,cpp}` | NVS persistence: per-species care blocks + active-species id. |
 | `src/main.cpp` | Orchestration: `setup`/`loop`, touch, WiFi/NTP, the active-species pointer + atomic swap, backlight. |
 | `test/` | Unity tests (`test_pet`, `test_sky`). |
-| `tools/` | `prep_sprite.py` (art), `load_env.py` (`.env` → flags). |
+| `tools/` | `clean_art.py` (raw-art prep), `prep_sprite.py` (sprite conversion), `load_env.py` (`.env` → flags). |
 | `img/` → `data/` | Per-species source art → processed LittleFS sprites. |
 
 ## Docs
@@ -118,4 +172,5 @@ Layered, one-way dependencies (`main → {render, anim, species, core} → hardw
 - [`docs/architecture.md`](docs/architecture.md) — the post-refactor architecture: modules, invariants, and the swappable-species design.
 - [`docs/development-guide.md`](docs/development-guide.md) — build/flash/test, the art pipeline, adding an animal.
 - [`docs/STATUS.md`](docs/STATUS.md) — rendering internals, the compositing band, display/transparency gotchas.
+- [`docs/PET_PROMPT.md`](docs/PET_PROMPT.md) — the ChatGPT prompt for generating a new animal's sprite set.
 - `_bmad-output/planning-artifacts/` — the architecture spine (AD-1..15) + the epic/story backlog the refactor was built from.

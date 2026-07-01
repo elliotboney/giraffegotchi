@@ -3,6 +3,10 @@
 
 # Python venv for the art pipeline (tools/prep_sprite.py)
 .venv/
+__pycache__/
+
+# Generated sprites — produced from img/ by `bun prep`, not source
+data/
 
 # Local reference art, not for version control
 docs/other_giraffes/
@@ -12,6 +16,8 @@ docs/other_giraffes/
 .claude/
 _bmad/
 
+# cleanart originals — kept locally, never committed (any depth)
+.backups/
 
 .env
 .env.local
