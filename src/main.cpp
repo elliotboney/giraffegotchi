@@ -515,10 +515,13 @@ static void applySpeciesSwap(int idx) {
 // Full-screen modal grid: one tile per species (icon sprite + lowercase name,
 // current outlined) plus a back tile, on a neutral dark panel (UX-DR2/6).
 static const uint32_t LONG_PRESS_MS = 800;   // BOOK held this long -> open the picker
-static bool     s_pickerOpen = false;
-static uint32_t s_pressStart = 0;            // when the current touch began
-static bool     s_pressBook  = false;        // current press began inside the BOOK rect
-static bool     s_longFired  = false;        // long-press already fired this hold
+static const uint32_t BOOK_GRACE   = 160;    // bridge brief touch flicker at the panel edge
+static const Rect     BOOK_HIT = { 256, 182, 64, 58 };  // generous hold/tap target (x256..320, y182..240)
+static bool     s_pickerOpen   = false;
+static uint32_t s_pressStart   = 0;          // when the current BOOK hold began
+static uint32_t s_bookLastSeen = 0;          // last frame a touch was inside BOOK_HIT
+static bool     s_bookHolding  = false;      // a BOOK hold is in progress
+static bool     s_longFired    = false;      // long-press already fired this hold
 
 static const uint16_t PK_BG   = 0x2104;      // neutral dark panel
 static const uint16_t PK_TILE = 0x3186;      // tile fill
@@ -737,8 +740,8 @@ void loop() {
       sy = tft.height() - 1 - sy;
     }
   }
-  const bool press   = down && !wasDown && sx >= 0;   // valid press edge
-  const bool release = !down && wasDown;
+  const bool press = down && !wasDown && sx >= 0;              // valid press edge
+  const bool bookTouched = (sx >= 0) && BOOK_HIT.contains(sx, sy);
 
   if (s_pickerOpen) {
     if (press) { wakeScreen(now); pickerHandleTap(sx, sy); }
@@ -747,38 +750,42 @@ void loop() {
     return;                          // modal: skip the pet render while the picker is up
   }
 
+  // Care buttons + the prank fire on the press EDGE (robust to edge flicker; the
+  // fast-mash die/revive relies on distinct press edges).
   if (press) {
     wakeScreen(now);                 // any tap restores full brightness
     const bool fast = (now - s_lastTap < FAST_TAP_MS);
     s_lastTap = now;
-    s_pressStart = now; s_longFired = false;
-    s_pressBook = BOOK_BTN.contains(sx, sy);
-
     if (s_dead) {
-      if (BOOK_BTN.contains(sx, sy)) {         // fast mashing revives (on press)
+      if (bookTouched) {                       // fast mashing revives
         s_tapStreak = fast ? s_tapStreak + 1 : 1;
         if (s_tapStreak >= FAST_TAP_REVIVE) revive();
       }
-    } else {
+    } else if (!bookTouched) {                 // BOOK is handled by the hold logic below
       bool care = true;
       if      (FEED_BTN.contains(sx, sy))  { pet.feed();  startEat(now, (int)Consume::Apple); }
       else if (DRINK_BTN.contains(sx, sy)) { pet.drink(); startEat(now, (int)Consume::Water); }
       else if (PLAY_BTN.contains(sx, sy))  { pet.play();  startPlay(now); }
       else if (CLEAN_BTN.contains(sx, sy)) { const uint8_t n = pet.poopCount(); pet.clean(); startClean(now, n); }
-      else care = false;                       // BOOK: read on release, picker on hold
+      else care = false;
       if (care) {                              // fast care-button mashing kills it
         s_tapStreak = fast ? s_tapStreak + 1 : 1;
         if (s_tapStreak >= FAST_TAP_DIE) die();
       }
     }
-  } else if (down && wasDown && s_pressBook && !s_dead && !s_longFired
-             && now - s_pressStart >= LONG_PRESS_MS) {
-    s_longFired = true;              // BOOK held: open the picker (once per hold, alive only)
-    openPicker();
-  } else if (release && s_pressBook && !s_longFired && !s_dead) {
-    pet.read();                      // BOOK short tap = read
   }
-  if (release) s_pressBook = false;
+
+  // BOOK tap/hold (alive only), tolerant of brief touch flicker at the panel edge
+  // via a grace window: a quick tap = read, a ~800ms hold = open the picker.
+  if (!s_dead && bookTouched) {
+    if (press) wakeScreen(now);
+    if (!s_bookHolding) { s_bookHolding = true; s_pressStart = now; s_longFired = false; }
+    s_bookLastSeen = now;
+    if (!s_longFired && now - s_pressStart >= LONG_PRESS_MS) { s_longFired = true; openPicker(); }
+  } else if (s_bookHolding && now - s_bookLastSeen > BOOK_GRACE) {
+    if (!s_longFired) pet.read();              // short BOOK tap = read
+    s_bookHolding = false;
+  }
   wasDown = down;
 
   // Dim the backlight after a stretch of no touches.
