@@ -31,6 +31,7 @@ gotchas: `docs/STATUS.md`. Plan of record: `_bmad-output/planning-artifacts/` (s
 Data + art, **no engine changes**. Generate art (`docs/PET_PROMPT.md`) into `img/<name>/` →
 `bun run cleanart <name>` (clean+align) → `bun prep <name>` → add `src/species/<name>.cpp`
 (copy `groundhog.cpp`) → register in `registry.cpp` → `bun flash`. Full steps: README "Adding an animal".
+**AI-agent playbook: `docs/adding-an-animal-agent.md`** (every animal defines its own food + biome).
 
 ## Invariants / gotchas (these bite — don't relearn them)
 

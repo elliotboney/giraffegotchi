@@ -4,8 +4,10 @@
 // Built-in species (defined in their own .cpp data files).
 extern const Species GIRAFFE;
 extern const Species GROUNDHOG;
+extern const Species FLAMINGO;
+extern const Species CHEETAH;
 
-static const Species* const SPECIES[] = { &GIRAFFE, &GROUNDHOG };
+static const Species* const SPECIES[] = { &GIRAFFE, &GROUNDHOG, &FLAMINGO, &CHEETAH };
 static const int SPECIES_N = sizeof(SPECIES) / sizeof(SPECIES[0]);
 
 // Default species on a fresh device (no valid save). The on-device picker + NVS

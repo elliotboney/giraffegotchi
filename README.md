@@ -107,7 +107,7 @@ Run `bun prep` (all) or `bun prep <species>` (one), then `bun uploadfs`.
 
 ## Adding an animal
 
-An animal is **data + art** — no engine changes (that's the whole point of the refactor). The full pose set looks like this (flamingo — click any thumbnail for the full-size image):
+An animal is **data + art** — no engine changes (that's the whole point of the refactor). Using an AI coding agent? Point it at [`docs/adding-an-animal-agent.md`](docs/adding-an-animal-agent.md) — a step-by-step playbook that encodes the invariants and the food+biome rule. The full pose set looks like this (flamingo — click any thumbnail for the full-size image):
 
 <table>
 <tr>

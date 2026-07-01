@@ -42,7 +42,7 @@ Emotions:
 5. dirty — grubby with a few dirt smudges and a little fly buzzing
 6. sad — frown, head and features drooping down
 7. sick — greenish tint, queasy expression, sweat drop
-8. sleepy — eyes nearly closed, mid-yawn
+8. sleepy — peaceful sleep with a sleep mask and sleep hat on, stars on both, you should NOT be able to see the closed eyes through the mask
 9. excited — big open smile, sparkle in the eyes, perked up
 10. reading — looking down, absorbed and calm (a small book is optional)
 
@@ -57,8 +57,8 @@ Idle twitches (tiny motions over the happy face):
 16. tail_left — tail swished to the left
 
 Kick mini-game:
-17. kick — a leg cocked back (wind-up / recovery)
-18. kick2 — the same leg fully extended forward (the kick)
+17. kick — left leg cocked back (wind-up / recovery)
+18. kick2 — the same left leg fully extended forward (the kick)
 
 Prank death:
 19. dead — lying on its back or side, X-shaped eyes, tongue out (the only non-standing pose)
@@ -66,11 +66,10 @@ Prank death:
 If this animal genuinely lacks a body part (a snake has no ears, a fish no legs), skip that pose
 rather than inventing one — but generate everything you reasonably can.
 
-Also generate a small **icon** sprite for the on-device animal-select menu: a simple, cute badge of
+# Other Images to Generate
+20. Also generate a small **icon** sprite for the on-device animal-select menu: a simple, cute badge of
 this animal (its head/face reads best), same pixel-art style, transparent background, framed as a
 small square (not at the body poses' scale). Name it `icon`. This is what shows in the picker grid.
 
-Optional extra: if this animal should eat something other than the default apple, also generate a
-small **food** sprite (the item it eats — e.g. a carrot for a groundhog), same pixel-art style,
-transparent background, framed as a small standalone item (not at the body poses' scale). Name it
-`food`. Skip it to keep the default apple.
+21. Generate a small **food** sprite (the item it eats — e.g. a carrot for a groundhog), same pixel-art style, transparent background, framed as a small standalone item (not at the body poses' scale). Name it
+`food`. 

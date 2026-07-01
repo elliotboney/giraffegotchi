@@ -119,11 +119,21 @@ def align_frames(files, frames):
             items.append((path, rgba, m))
     if not items:
         return
-    h, w = items[0][2].shape
+    # Frames need not share a size: a re-run mixes already-canvassed poses with a
+    # newly-added raw one. Pad every mask (top-left) onto one max-size canvas so
+    # all FFTs share a shape; content stays at (0,0) so the bbox math below holds.
+    h = max(m.shape[0] for _, _, m in items)
+    w = max(m.shape[1] for _, _, m in items)
+    def _pad(m):
+        if m.shape == (h, w):
+            return m
+        p = np.zeros((h, w), np.float32)
+        p[:m.shape[0], :m.shape[1]] = m
+        return p
     ref_i = next((i for i, (p, _, _) in enumerate(items)
                   if os.path.basename(p) == REF_POSE + ".png"), 0)
-    fref = np.fft.rfft2(items[ref_i][2])
-    shifts = [_best_shift(fref, m, h, w) for _, _, m in items]
+    fref = np.fft.rfft2(_pad(items[ref_i][2]))
+    shifts = [_best_shift(fref, _pad(m), h, w) for _, _, m in items]
     # Union of the shifted content bboxes -> shared canvas.
     ux0 = uy0 = 1 << 30
     ux1 = uy1 = -(1 << 30)

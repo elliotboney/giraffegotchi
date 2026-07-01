@@ -2,7 +2,7 @@
   "name": "giraffegotchi",
   "private": true,
   "scripts": {
-    "help": "printf '\\n  giraffegotchi commands\\n\\n  bun setup       one-time: create .venv + install Pillow (art pipeline)\\n  bun compile     build firmware (esp32dev)\\n  bun upload      flash firmware\\n  bun uploadfs    flash sprites (data/) to LittleFS\\n  bun flash       firmware + sprites\\n  bun native      run the unit tests (43, host-native)\\n  bun monitor     serial monitor\\n  bun prep [sp]   process art (all species, or one: bun prep giraffe)\\n  bun run help    this list\\n\\n'",
+    "help": "printf '\\n  giraffegotchi commands\\n\\n  bun setup       one-time: create .venv + install Pillow (art pipeline)\\n  bun compile     build firmware (esp32dev)\\n  bun upload      flash firmware\\n  bun uploadfs    flash sprites (data/) to LittleFS\\n  bun flash       firmware + sprites\\n  bun native      run the unit tests (43, host-native)\\n  bun monitor     serial monitor\\n  bun cleanart <sp>        prep raw art: bg-remove + align frames (.backups/)\\n  bun cleanart:revert <sp> undo cleanart (restore from .backups/)\\n  bun prep [sp]   process art (all species, or one: bun prep giraffe)\\n  bun run help    this list\\n\\n'",
     "setup": "python3.12 -m venv .venv && .venv/bin/pip install -q --upgrade pip Pillow numpy",
     "cleanart": ".venv/bin/python tools/clean_art.py",
     "cleanart:revert": ".venv/bin/python tools/clean_art.py --revert",

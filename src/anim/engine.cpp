@@ -80,9 +80,9 @@ static const int      SLEEP_ZS = 3;
 
 // Cached decode of the active species' food sprite (decoded once per sprite; the
 // active-species swap in Epic 4 changes food.sprite, re-triggering the decode).
-static uint16_t*   s_foodBuf    = nullptr;
-static const char* s_foodSprite = nullptr;
-static int         s_foodW = 0, s_foodH = 0;
+static uint16_t*      s_foodBuf  = nullptr;
+static const FoodItem* s_foodItem = nullptr;   // key on the FoodItem*, not the sprite NAME: two
+static int            s_foodW = 0, s_foodH = 0; // species can share the name "food" (pointers pool)
 
 // Composite the decoded food sprite into the band BY HAND at band-local centre
 // (cx,cy): byte-swapped + key-skipped + bounds-clipped, exactly like
@@ -136,11 +136,11 @@ void anim::composeEat(TFT_eSPI& c, int ox, int oy, uint32_t t, Consume kind) {
 void anim::composeFoodBand(TFT_eSprite& band, uint32_t t) {
   const FoodItem* food = activeSpecies().food;
   if (!food) return;
-  if (s_foodSprite != food->sprite) {          // decode once (cached; re-decodes after a swap)
+  if (s_foodItem != food) {                    // decode once (cached; re-decodes after a swap)
     free(s_foodBuf);
     s_foodBuf = (uint16_t*)malloc((size_t)food->w * food->h * sizeof(uint16_t));
     if (s_foodBuf && !renderPoseToBuffer(s_foodBuf, food->sprite, food->w)) { free(s_foodBuf); s_foodBuf = nullptr; }
-    s_foodW = food->w; s_foodH = food->h; s_foodSprite = food->sprite;
+    s_foodW = food->w; s_foodH = food->h; s_foodItem = food;
   }
   if (!s_foodBuf) return;
   const SpeciesAnchors& a = activeSpecies().anchors;
