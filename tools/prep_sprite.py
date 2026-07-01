@@ -224,8 +224,9 @@ def report_budget(out_root):
         print(f"  {name:<12} {sz:>8,} B")
     pct = 100.0 * total / FS_BUDGET
     print(f"  {'TOTAL':<12} {total:>8,} B  ({pct:.1f}% of {FS_BUDGET:,} B partition)")
-    if total > FS_BUDGET:
-        print("  !! OVER BUDGET — sprites won't fit the LittleFS partition")
+    if total > FS_BUDGET:                       # fail loudly rather than let uploadfs truncate (Story 5.3)
+        print(f"  !! OVER BUDGET by {total - FS_BUDGET:,} B — won't fit the LittleFS partition")
+        sys.exit(1)
 
 
 def main():
