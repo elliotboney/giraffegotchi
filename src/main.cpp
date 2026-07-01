@@ -470,9 +470,10 @@ static void applySpeciesSwap(int idx) {
   eat.active = play_.active = cln.active = slp.active = dream.active = false;
   s_kickPose = -1;
 
-  // 2. switch species, then size the pose buffer to the new geometry. Build the
-  //    new buffer BEFORE freeing the old — an alloc failure keeps the current
-  //    species (fail-safe) rather than crashing.
+  // 2. preserve the CURRENT animal's care state, then size the pose buffer to the
+  //    new geometry. Build the new buffer BEFORE freeing the old — an alloc
+  //    failure keeps the current species (fail-safe) rather than crashing.
+  save::captureActive(pet, s_dead);   // A's stats kept (FR12)
   setActiveSpecies(idx);
   uint16_t* nb = (uint16_t*)malloc(spriteW() * spriteH() * sizeof(uint16_t));
   if (!nb) { setActiveSpecies(prevIdx); Serial.println("[swap] alloc failed — kept current"); return; }
@@ -480,7 +481,8 @@ static void applySpeciesSwap(int idx) {
   skyBand.deleteSprite();
   bandOk = (skyBand.createSprite(spriteW(), bandH()) != nullptr);
 
-  // 3. decode the new species' sprites (pose buffer + ball) and reset anim state
+  // 3. load the NEW animal's own care state, decode its sprites, reset anim state
+  save::loadActive(pet, s_dead);      // B resumes its own last-saved stats (FR12)
   reloadBall();
   if (s_dead) renderPoseToBuffer(giraffeBuf, "dead");
   else        engine.forcePose(pet.emotion(), giraffeBuf);
@@ -491,6 +493,7 @@ static void applySpeciesSwap(int idx) {
   //    orphan) and paints the new world.
   setSkyPhase(currentSkyPhase());
   repaintScene();
+  save::writeNow(pet, s_dead);    // persist the new active id + both animals' blocks
   Serial.printf("[swap] now %s\n", activeSpecies().name);
 }
 
@@ -507,6 +510,15 @@ void setup() {
   ledcAttachPin(TFT_BL, BL_CH);
   backlight(BL_FULL);
 
+  // Filesystem + persisted state FIRST: save::restore sets the ACTIVE species,
+  // so the buffers below are sized to the right geometry (a persisted/swapped-in
+  // species may differ from the compile-time default).
+  if (!LittleFS.begin()) {
+    Serial.println("LittleFS mount failed — run 'pio run -t uploadfs'");
+  }
+  save::begin();                   // open NVS
+  save::restore(pet, s_dead);      // set active species + restore its care block
+
   giraffeBuf = (uint16_t*)malloc(spriteW() * spriteH() * sizeof(uint16_t));
   if (!giraffeBuf) Serial.println("giraffeBuf malloc failed — giraffe won't render");
 
@@ -521,16 +533,9 @@ void setup() {
 
   drawScene(tft);
 
-  if (!LittleFS.begin()) {
-    Serial.println("LittleFS mount failed — run 'pio run -t uploadfs'");
-  }
-
   touchSPI.begin(XPT2046_CLK, XPT2046_MISO, XPT2046_MOSI, XPT2046_CS);
   ts.begin(touchSPI);
   ts.setRotation(1);
-
-  save::begin();                   // open NVS
-  save::restore(pet, s_dead);      // restore care stats from before the power loss
 
   engine.start(millis());
   if (s_dead) { renderPoseToBuffer(giraffeBuf, "dead"); pushGiraffe(); }
