@@ -5,9 +5,9 @@
 #include <XPT2046_Touchscreen.h>
 #include <WiFi.h>
 #include <time.h>
-#include <Preferences.h>
 #include "pet.h"
 #include "ui.h"
+#include "io/save.h"
 
 // Injected from .env by tools/load_env.py. Fallbacks keep the build working
 // without a .env (firmware just stays in daytime — no WiFi/time).
@@ -52,29 +52,9 @@ XPT2046_Touchscreen ts(XPT2046_CS, XPT2046_IRQ);
 Pet pet;
 Emotion lastEmotion;
 
-// Persisted care state (survives power loss). Saved to NVS on change (throttled)
-// and restored on boot. Restore is as-is — a power cut doesn't age the giraffe.
-Preferences prefs;
-bool s_dead = false;                         // prank death state (persisted)
-struct PetSave { uint8_t magic, hu, th, fn, hy, poop, dead; };
-static const uint8_t  SAVE_MAGIC = 0x68;     // bump if PetSave layout changes
-static bool     s_saveDirty = false;
-static uint32_t s_lastSave  = 0;
-
-static void saveState() {
-  const PetSave s{ SAVE_MAGIC, pet.hunger(), pet.thirst(), pet.fun(),
-                   pet.hygiene(), pet.poopCount(), (uint8_t)s_dead };
-  prefs.putBytes("pet", &s, sizeof(s));
-}
-static void loadState() {
-  PetSave s;
-  if (prefs.getBytes("pet", &s, sizeof(s)) == sizeof(s) && s.magic == SAVE_MAGIC) {
-    pet.load(s.hu, s.th, s.fn, s.hy, s.poop);
-    s_dead = s.dead != 0;
-    Serial.printf("[save] restored H%u T%u F%u C%u poop%u dead%u\n",
-                  s.hu, s.th, s.fn, s.hy, s.poop, s.dead);
-  }
-}
+// Prank-death state (persisted via io/save). Owned here (orchestration); the
+// save module takes it by value/ref — a power cut doesn't age the giraffe.
+bool s_dead = false;
 static uint16_t* giraffeBuf = nullptr;  // persistent sprite buffer (~48 KB, heap — keeps it out of static DRAM so the WiFi stack fits)
 static const int BALL_PX = 80;                      // beach-ball sprite size
 TFT_eSprite ballSpr = TFT_eSprite(&tft);            // beach ball (rotatable sprite, heap-allocated)
@@ -636,8 +616,8 @@ void setup() {
   ts.begin(touchSPI);
   ts.setRotation(1);
 
-  prefs.begin("giraffe", false);   // NVS namespace
-  loadState();                     // restore care stats from before the power loss
+  save::begin();                   // open NVS
+  save::restore(pet, s_dead);      // restore care stats from before the power loss
 
   lastEmotion = pet.emotion();
   if (s_dead) { renderSpriteToBuffer(giraffeBuf, "/giraffe_dead.png"); pushGiraffe(); }
@@ -673,7 +653,7 @@ static void die() {
   s_dead = true; s_tapStreak = 0;
   eat.active = play_.active = cln.active = slp.active = dream.active = false;
   renderSpriteToBuffer(giraffeBuf, "/giraffe_dead.png");   // band shows it next frame
-  saveState();                                             // death survives a power cycle
+  save::writeNow(pet, s_dead);                             // death survives a power cycle
   Serial.println("[prank] the giraffe has perished — mash the book to revive");
 }
 
@@ -683,7 +663,7 @@ static void revive() {
   updateGiraffe(pet.emotion());             // sets lastEmotion + repaints
   lastStats[0] = lastStats[1] = lastStats[2] = lastStats[3] = 255;  // force meter redraw
   lastPoop = 255;
-  saveState();
+  save::writeNow(pet, s_dead);
   Serial.println("[prank] revived — good as new");
 }
 
@@ -869,7 +849,7 @@ void loop() {
   if (hu != lastStats[0] || th != lastStats[1] || fn != lastStats[2] || hy != lastStats[3]) {
     drawMeters(tft, hu, th, fn, hy);
     lastStats[0] = hu; lastStats[1] = th; lastStats[2] = fn; lastStats[3] = hy;
-    s_saveDirty = true;
+    save::markDirty();
   }
 
   // Redraw poop when the count changes (spawn or clean).
@@ -877,15 +857,11 @@ void loop() {
   if (pc != lastPoop) {
     drawPoops(tft, pc);
     lastPoop = pc;
-    s_saveDirty = true;
+    save::markDirty();
   }
 
   // Persist care state on change, throttled to spare the flash (≤ once / 5 s).
-  if (s_saveDirty && now - s_lastSave >= 5000) {
-    saveState();
-    s_lastSave = now;
-    s_saveDirty = false;
-  }
+  save::tick(now, pet, s_dead);
 
   delay(10);
 }
