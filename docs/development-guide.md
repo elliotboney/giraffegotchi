@@ -70,7 +70,7 @@ Then `bun uploadfs`. Magenta must never appear inside a silhouette (it's the tra
 
 ## Adding an animal
 
-Data + art only — no engine changes. See the **Adding an animal** section in the top-level [README](../README.md#adding-an-animal): drop `img/<name>/` art → `bun prep <name>` → add `src/species/<name>.cpp` (copy `groundhog.cpp`) → register in `registry.cpp` → `bun flash`.
+Data + art only — no engine changes. Full human steps: the **Adding an animal** section in the top-level [README](../README.md#adding-an-animal). Using an AI agent: [`adding-an-animal-agent.md`](adding-an-animal-agent.md) (the playbook — encodes invariants, the food+biome rule, and the ask-the-human-for-a-name step). Flow: drop `img/<name>/` art → `bun run cleanart <name>` (bg-remove + align; re-runnable after adding one pose) → `bun prep <name>` → add `src/species/<name>.cpp` (copy `groundhog.cpp`; give it its own food + biome) → register in `registry.cpp` → `bun native && bun compile` → `bun flash`.
 
 ## Testing
 

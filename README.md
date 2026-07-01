@@ -2,7 +2,7 @@
 
 <img width="523" height="388" alt="image" src="https://github.com/user-attachments/assets/f9c86c1c-1b28-4a17-929a-1d7cde17333a" />
 
-A Tamagotchi-style digital pet running on an ESP32 **"Cheap Yellow Display" (CYD)**. It began as a giraffe and is now a **swappable-animal platform**: each animal is one *data descriptor* — its own sprites, animations, biome, and food — and you switch between them right on the device. Ships with a **giraffe** (savanna) and a **groundhog** (meadow). Feed, water, play, and clean up on a 240×320 touchscreen, in a hand-drawn world that follows the real sun.
+A Tamagotchi-style digital pet running on an ESP32 **"Cheap Yellow Display" (CYD)**. It began as a giraffe and is now a **swappable-animal platform**: each animal is one *data descriptor* — its own sprites, animations, biome, and food — and you switch between them right on the device. Ships with four: a **giraffe** (savanna), a **groundhog** (meadow), a **flamingo** ("frances", lagoon), and a **cheetah** ("spot", plains). Feed, water, play, and clean up on a 240×320 touchscreen, in a hand-drawn world that follows the real sun.
 
 ## What it does
 

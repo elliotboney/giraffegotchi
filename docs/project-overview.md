@@ -7,8 +7,9 @@ _Updated 2026-07-01 · post swappable-animals refactor._
 A Tamagotchi-style digital pet running as **ESP32 Arduino firmware** on the
 **ESP32-2432S028R "Cheap Yellow Display" (CYD)**. It began as a giraffe and is now a
 **swappable-animal platform**: each animal is one data descriptor (sprites, animations, biome,
-food) and you switch between them on-device. Ships with a giraffe (savanna) and a groundhog
-(meadow). Five buttons drive four care meters; mood, biome, and a real-time day/night cycle are
+food) and you switch between them on-device. Ships with four — a giraffe (savanna), a groundhog
+(meadow), a flamingo ("frances", lagoon), and a cheetah ("spot", plains). Five buttons drive four
+care meters; mood, biome, and a real-time day/night cycle are
 computed on-device.
 
 ## Classification

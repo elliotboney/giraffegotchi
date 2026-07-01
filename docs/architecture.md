@@ -94,6 +94,9 @@ Throttled ≤ once / 5 s, plus immediate writes on swap/die/revive.
 6. **Anything crossing the box is split** into out-of-box direct (viewport clip) + in-box band composite — pixel-level, never whole-object skip.
 7. **`TFT_eSprite::pushImage` has no working transparent overload** — composite into the band by hand (byte-swap + key-skip + bounds-clip). `pushImage(..., key)` on a sprite can run off-bounds and freeze the device.
 8. **Display on HSPI, touch on VSPI** — separate buses.
+9. **Every animal defines its own food + biome** (project rule — no drawn-apple fallback, no borrowed world). A missing food sprite safely no-ops, so a descriptor can ship before its food art.
+10. **The food-sprite cache keys on the `FoodItem*`, not the sprite name** (`engine.cpp` `s_foodItem`). Identical `"food"` string literals pool to one pointer across translation units, so keying on the name shows the previous species' food after a swap.
+11. **Picker icons are fixed 64×64** (`decodePng` copies each line at native width — no scaling). Tiles can't shrink below 64px; the grid is 4-across and adapts rows + back-bar + vertical centering to species count.
 
 ## 7. Hardware (pinout)
 

@@ -525,14 +525,30 @@ static bool     s_longFired    = false;      // long-press already fired this ho
 
 static const uint16_t PK_BG   = 0x2104;      // neutral dark panel
 static const uint16_t PK_TILE = 0x3186;      // tile fill
-static const int PK_COLS   = 3;
-static const int PK_TW = 100, PK_TH = 108, PK_GAP = 4, PK_X0 = 9, PK_Y0 = 42;
+static const int PK_COLS   = 4;
+static const int PK_TW = 72, PK_TH = 80, PK_GAP = 5, PK_X0 = 8;
+static const int PK_BACK_W = 120, PK_BACK_H = 34;   // back is a wide bar below the grid
 
-// Tile rect for item i (0..speciesCount-1 = species, then the back tile). Targets
-// are 100x108 >= 44px (UX-DR6).
+// Grid geometry adapts to species count: tiles fill 4-across, the back bar sits
+// just below the last row, and the whole block is vertically centred under the
+// (now small) title — so it never runs off-screen as more animals are added.
+static int pickerRows() { return (speciesCount() + PK_COLS - 1) / PK_COLS; }
+static int pickerTop() {
+  const int rows = pickerRows();
+  const int contentH = rows * PK_TH + (rows - 1) * PK_GAP + PK_GAP + PK_BACK_H;
+  const int top = 24 + (240 - 24 - contentH) / 2;   // 24 = just below the small title
+  return top < 24 ? 24 : top;
+}
+
+// Tile rect for item i (0..speciesCount-1 = species, then the back tile). Species
+// tiles are 72x80 (>= 44px, UX-DR6); the back tile is a centred bar under the grid.
 static Rect pickerTile(int i) {
+  const int top = pickerTop();
+  if (i >= speciesCount())                          // back: centred bar below the last row
+    return { (int16_t)((320 - PK_BACK_W) / 2), (int16_t)(top + pickerRows() * (PK_TH + PK_GAP)),
+             (int16_t)PK_BACK_W, (int16_t)PK_BACK_H };
   const int col = i % PK_COLS, row = i / PK_COLS;
-  return { (int16_t)(PK_X0 + col * (PK_TW + PK_GAP)), (int16_t)(PK_Y0 + row * (PK_TH + PK_GAP)),
+  return { (int16_t)(PK_X0 + col * (PK_TW + PK_GAP)), (int16_t)(top + row * (PK_TH + PK_GAP)),
            (int16_t)PK_TW, (int16_t)PK_TH };
 }
 
@@ -546,7 +562,7 @@ static void drawPickerIcon(const Species& s, const Rect& r) {
   if (renderSpriteToBuffer(icon, path, 64)) {
     const bool sw = tft.getSwapBytes();
     tft.setSwapBytes(true);
-    tft.pushImage(r.x + (r.w - 64) / 2, r.y + 8, 64, 64, icon, icon[0]);
+    tft.pushImage(r.x + (r.w - 64) / 2, r.y + 2, 64, 64, icon, icon[0]);
     tft.setSwapBytes(sw);
   }
 }
@@ -555,7 +571,7 @@ static void drawPicker() {
   tft.fillScreen(PK_BG);
   tft.setTextColor(TFT_WHITE);
   tft.setTextDatum(MC_DATUM);
-  tft.drawString("choose animal", 160, 22, 4);
+  tft.drawString("choose animal", 160, 10, 2);
 
   const int active = activeSpeciesIndex();
   for (int i = 0; i < speciesCount(); i++) {
@@ -569,7 +585,7 @@ static void drawPicker() {
     drawPickerIcon(s, r);
     tft.setTextColor(TFT_WHITE);
     tft.setTextDatum(MC_DATUM);
-    tft.drawString(s.displayName, r.x + r.w / 2, r.y + r.h - 12, s.icon ? 2 : 4);
+    tft.drawString(s.displayName, r.x + r.w / 2, r.y + r.h - 9, s.icon ? 2 : 4);
   }
   const Rect b = pickerTile(speciesCount());
   tft.fillRoundRect(b.x, b.y, b.w, b.h, 8, 0x4208);

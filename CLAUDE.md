@@ -2,8 +2,8 @@
 
 Tamagotchi-style digital pet on an ESP32 **"Cheap Yellow Display" (CYD)**, ILI9341 240×320 +
 XPT2046 touch. PlatformIO / Arduino / C++. It's a **swappable-animal platform**: each animal is
-one data descriptor (sprites, animations, biome, food), switchable on-device. Ships giraffe +
-groundhog.
+one data descriptor (sprites, animations, biome, food), switchable on-device. Ships four:
+giraffe (savanna), groundhog (meadow), flamingo/"frances" (lagoon), cheetah/"spot" (plains).
 
 ## Commands (bun scripts — `bun run help` lists them)
 
@@ -17,7 +17,7 @@ groundhog.
 ## Architecture (layered, one-way: `main → {render, anim, species, core} → hw`)
 
 - `src/pet.{h,cpp}` + `src/core/sky.{h,cpp}` — **core**: pure logic, no hardware, native-tested. (`pet` stayed at `src/`; only `sky` moved to `core/`.)
-- `src/species/` — `species.h` (Species/AnimSpec/Biome/FoodItem types + Capability), `registry.{h,cpp}`, and each animal as data (`giraffe.cpp`, `groundhog.cpp`).
+- `src/species/` — `species.h` (Species/AnimSpec/Biome/FoodItem types + Capability), `registry.{h,cpp}`, and each animal as data (`giraffe.cpp`, `groundhog.cpp`, `flamingo.cpp`, `cheetah.cpp`).
 - `src/anim/engine.{h,cpp}` — data-driven animation engine (pose floor, tics, foreground composers, food).
 - `src/ui.{h,cpp}` — **render**: biome scene, compositing band, sprite decode, meters/buttons/picker.
 - `src/io/save.{h,cpp}` — NVS per-species care blocks + active-species id (versioned, `SAVE_MAGIC` 0x69).
@@ -36,6 +36,9 @@ Data + art, **no engine changes**. Generate art (`docs/PET_PROMPT.md`) into `img
 ## Invariants / gotchas (these bite — don't relearn them)
 
 - **Nothing species-specific outside the `Species` descriptor** (paths, geometry, anchors, palette, props, food).
+- **Every animal defines its OWN food + biome** (project rule — no drawn-apple fallback, no borrowed world). A missing food sprite safely no-ops (renderPose fails → buffer freed → nothing drawn), so the descriptor can ship before the art.
+- **The per-species food cache keys on the `FoodItem*`, not the sprite name** (`engine.cpp` `s_foodItem`). Two species can both name their sprite `"food"`; identical string literals pool to one pointer across files, so keying on the name shows the *previous* species' food after a swap. Don't "simplify" it back to the name.
+- **Picker icons are fixed 64×64** — `decodePng` copies each line at the PNG's native width (no scaling), so tiles can't shrink below 64px wide. The grid is 4-across and adapts rows + back-bar position + vertical centering to species count (`pickerTop`/`pickerTile`).
 - **`TFT_eSprite::pushImage` has no working transparent overload** — composite into the band by hand (byte-swap + key-skip + bounds-clip), like `composeSkyBand` / `blitFoodToBand`. `pushImage(...,key)` on a sprite can run off-bounds and **freeze the device**.
 - **Magenta `0xF81F` is the transparency key**, read at runtime from `giraffeBuf[0]`; never inside a silhouette. Keep `prep_sprite.py MAGENTA_RGB` in lockstep.
 - **All erases go through `restoreBg`** (never flat fill; panel `readRect` is broken on this CYD).
@@ -51,8 +54,15 @@ Data + art, **no engine changes**. Generate art (`docs/PET_PROMPT.md`) into `img
 
 ## State (2026-07-01)
 
-Swappable-animals refactor **complete**, all 5 epics on `main` (pushed to origin). Next up:
-the **flamingo** ("frances") — only `img/flamingo/happy.png` exists so far (WIP, no descriptor).
+Swappable-animals refactor **complete**, all 5 epics on `main`. Four species shipping:
+giraffe, groundhog, **flamingo** ("frances", lagoon), **cheetah** ("spot", plains) — both added
+this session (descriptor + own biome + own food), committed + pushed (`ff006ee`). Also this
+session: food-cache swap bug fixed (key on `FoodItem*`), `cleanart` re-run crash fixed (pads
+frames to a common size), picker relaid-out (4-across, small title, adaptive back-bar + vertical
+centering), and **`docs/adding-an-animal-agent.md`** added — the AI-agent playbook for adding
+animals (ask the human for the name; every animal defines its own food + biome). `sleepy` is the
+night-sleep pose (draw eyes-closed; prompt now specs a sleep mask + hat). All in the working tree
+is committed; next step is an on-device `bun flash` to verify the two new animals + picker + food.
 
 ## Working style
 
