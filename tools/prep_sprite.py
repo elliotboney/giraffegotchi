@@ -43,11 +43,16 @@ MAGENTA_RGB = (248, 0, 248)
 
 ICON_PX = 64               # square size for a species' picker icon
 OBJECT_DEFAULT = 48        # square size for an unlisted prop
+DREAM_PX = 64              # daydream wish-objects (dream1..N); MUST equal DREAM_OBJ in anim/engine.cpp
 OBJECT_SIZES = {           # per-prop square sizes
     "beach_ball": 80,
     "food": 40,
     "kite": 56,
 }
+
+
+def object_px(stem):       # dreamN share one size by prefix (variable count per species)
+    return DREAM_PX if stem.startswith("dream") else OBJECT_SIZES.get(stem, OBJECT_DEFAULT)
 
 # LittleFS partition budget (default esp32 4MB table -> 0x170000). Refined/
 # enforced in Story 5.3; here we just report against it.
@@ -206,7 +211,7 @@ def prep_species(name, body_dir, objects_dir, out_root):
         for f in sorted(os.listdir(objects_dir)):
             if not f.endswith(".png"):
                 continue
-            size = OBJECT_SIZES.get(f[:-4], OBJECT_DEFAULT)
+            size = object_px(f[:-4])
             prep(os.path.join(objects_dir, f), os.path.join(out_dir, f), size, size, margin=2)
             n += 1
     print(f"  {name}: {n} sprites -> {out_dir}")

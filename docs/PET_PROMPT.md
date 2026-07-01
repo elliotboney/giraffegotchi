@@ -73,3 +73,11 @@ small square (not at the body poses' scale). Name it `icon`. This is what shows 
 
 21. Generate a small **food** sprite (the item it eats — e.g. a carrot for a groundhog), same pixel-art style, transparent background, framed as a small standalone item (not at the body poses' scale). Name it
 `food`. 
+
+22. **(Optional) Daydream objects.** Generate a few small **wish** sprites — things this animal
+daydreams about while it's happy (a favorite treat, a toy, a heart, its food, a butterfly). Same
+pixel-art style, transparent background, each framed as a small standalone item roughly 64×64, hard
+edges. Name them `dream1`, `dream2`, `dream3`, … (as few or as many as you like). These appear one
+at a time inside a floating thought bubble above the pet. Skip this section entirely if the animal
+has no daydreams — the bubble just won't show.
+

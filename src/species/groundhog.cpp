@@ -65,4 +65,5 @@ extern const Species GROUNDHOG = {   // `extern` for external linkage (const is 
   /* biome   */ &MEADOW,
   /* food    */ &GH_FOOD,
   /* icon    */ "icon",
+  /* dreams  */ 3,   // objects/dream1..3.png (art pending)
 };

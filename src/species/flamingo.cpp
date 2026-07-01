@@ -67,4 +67,5 @@ extern const Species FLAMINGO = {   // `extern` for external linkage (const is i
   /* biome   */ &LAGOON,
   /* food    */ &FL_FOOD,
   /* icon    */ "icon",
+  /* dreams  */ 3,   // objects/dream1..3.png (art pending)
 };

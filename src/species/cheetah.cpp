@@ -60,10 +60,11 @@ extern const Species CHEETAH = {   // `extern` for external linkage (const is in
   "spot",
   "/cheetah",
   /* geom    */ { 150, 160, 85, 34, 165 },   // same footprint as the giraffe (head at top)
-  /* anchors */ { 155, 101, 52, 202, 86, 216, 42, 230, 42 },  // copied from giraffe; refine on device
+  /* anchors */ { 155, 101, 52, 202, 86, 216, 42, 258, 60 },  // copied from giraffe; dream shifted right + down for the big bubble
   /* caps    */ CAP_KICK,                     // kick only; no kite art -> no CAP_KITE
   /* anims   */ &CH_ANIMS,
   /* biome   */ &PLAINS,
   /* food    */ &CH_FOOD,
   /* icon    */ "icon",
+  /* dreams  */ 3,   // objects/dream1..3.png (art pending)
 };

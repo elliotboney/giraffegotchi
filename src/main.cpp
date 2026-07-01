@@ -219,8 +219,7 @@ static void stopSleep() { slp.active = false; }
 // Daydream: an occasional thought bubble above the head while idle + content.
 static const uint32_t DAYDREAM_SHOW_MS = 3800;
 static const uint32_t DAYDREAM_GAP_MS  = 20000;    // quiet gap between daydreams
-static const int      DREAM_ICONS      = 4;
-DaydreamAnim dream;
+DaydreamAnim dream;                                // wish count is per-species (Species::dreamN)
 
 // Play animations rotate through a list on each PLAY press. Butterfly & bubbles
 // are universal band effects; the KITE (direct swoop) and KICK (ball physics) are
@@ -845,10 +844,11 @@ void loop() {
 
     // Daydream while idle + content: a thought bubble pops up now and then.
     const bool idle = (e == Emotion::Happy && !play_.active && !cln.active && !slp.active);
-    if (idle) {
+    const uint8_t dreamN = activeSpecies().dreamN;
+    if (idle && dreamN > 0) {
       if (!dream.active && now >= dream.next) {
         dream.active = true;  dream.start = now;
-        dream.icon = (dream.icon + 1) % DREAM_ICONS;
+        dream.icon = (dream.icon + 1) % dreamN;
         dream.next = now + DAYDREAM_SHOW_MS + DAYDREAM_GAP_MS;
       }
       if (dream.active && now - dream.start >= DAYDREAM_SHOW_MS) dream.active = false;

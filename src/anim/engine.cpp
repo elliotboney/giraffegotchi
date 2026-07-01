@@ -3,6 +3,7 @@
 #include "../species/registry.h"   // activeSpecies() — specs + anchors from the descriptor
 #include <math.h>                  // sinf (butterfly / bubbles)
 #include <stdlib.h>                // malloc/free (food-sprite cache)
+#include <stdio.h>                 // snprintf (dream-object pose path)
 
 namespace anim {
 
@@ -165,36 +166,82 @@ void anim::composeSleepZ(TFT_eSprite& c, uint32_t sinceStart) {
   c.setTextSize(1);   // restore so other text (meters, buttons) is normal
 }
 
-static void drawHeart(TFT_eSPI& c, int x, int y) {
-  c.fillCircle(x - 3, y - 2, 3, TFT_RED);
-  c.fillCircle(x + 3, y - 2, 3, TFT_RED);
-  c.fillTriangle(x - 6, y, x + 6, y, x, y + 8, TFT_RED);
-}
-static void drawNote(TFT_eSPI& c, int x, int y) {
-  c.fillCircle(x - 3, y + 4, 3, TFT_NAVY);
-  c.fillRect(x, y - 6, 3, 11, TFT_NAVY);
-  c.fillRect(x, y - 6, 7, 3, TFT_NAVY);
+// --- Daydream thought bubble: a white vector cloud + a per-species "wish" object
+// loaded from <assetFolder>/objects/dream<N>.png. Objects are a fixed square and
+// decoded once per (species, icon) into a cache, exactly like the food sprite; a
+// missing PNG leaves the buffer null and the whole bubble no-ops (no empty cloud).
+static const int DREAM_OBJ = 64;   // dream-object size (px); prep art to this square (== prep_sprite DREAM_PX)
+
+static uint16_t*      s_dreamBuf  = nullptr;
+static const Species* s_dreamSp   = nullptr;   // decoded for this (species, icon) pair
+static int            s_dreamIcon = -1;
+
+// (Re)decode the wish object for `icon` when the active species or icon changed.
+// Prefilled with the magenta key so an object PNG smaller than DREAM_OBJ (or a
+// missing/short one) stays transparent rather than showing garbage rows.
+static void ensureDreamBuf(int icon) {
+  const Species& sp = activeSpecies();
+  if (s_dreamSp == &sp && s_dreamIcon == icon && s_dreamBuf) return;   // cached
+  free(s_dreamBuf); s_dreamBuf = nullptr;
+  s_dreamSp = &sp; s_dreamIcon = icon;
+  if (sp.dreamN == 0) return;
+  const int n = DREAM_OBJ * DREAM_OBJ;
+  s_dreamBuf = (uint16_t*)malloc((size_t)n * sizeof(uint16_t));
+  if (!s_dreamBuf) return;
+  for (int i = 0; i < n; i++) s_dreamBuf[i] = 0xF81F;   // magenta transparency key
+  char pose[24];
+  snprintf(pose, sizeof(pose), "dream%d", icon + 1);   // prep flattens objects/ -> <folder>/dreamN.png
+  if (!renderPoseToBuffer(s_dreamBuf, pose, DREAM_OBJ)) { free(s_dreamBuf); s_dreamBuf = nullptr; }
 }
 
-// Thought-bubble shape (cloud + the current wish icon).
-static void drawDreamShape(TFT_eSPI& c, int x, int y, int icon) {
-  c.fillCircle(x,      y,      14, TFT_WHITE);        // thought cloud
-  c.fillCircle(x - 14, y + 5,   9, TFT_WHITE);
-  c.fillCircle(x + 14, y + 5,   9, TFT_WHITE);
-  c.fillCircle(x,      y + 9,   9, TFT_WHITE);
-  c.fillCircle(x - 21, y + 21,  3, TFT_WHITE);        // connector dots down-left to head
-  c.fillCircle(x - 28, y + 28,  2, TFT_WHITE);
-  switch (icon) {                                     // the wish
-    case 0:  drawFood(c, x, y, 8);          break;    // apple
-    case 1:  drawHeart(c, x, y);            break;
-    case 2:  drawNote(c, x, y);             break;
-    default: drawButterfly(c, x, y, true);  break;
+// The white thought cloud (bigger than the old icon bubble). The wish object is
+// composited on top separately — band vs panel need different transparent blits.
+static void drawDreamCloud(TFT_eSPI& c, int x, int y) {
+  c.fillCircle(x,      y,      34, TFT_WHITE);        // thought cloud (holds a 64px object)
+  c.fillCircle(x - 32, y + 13, 20, TFT_WHITE);
+  c.fillCircle(x + 32, y + 13, 20, TFT_WHITE);
+  c.fillCircle(x,      y + 22, 20, TFT_WHITE);
+  c.fillCircle(x - 42, y + 42,  6, TFT_WHITE);        // connector dots down-left to head
+  c.fillCircle(x - 52, y + 52,  3, TFT_WHITE);
+}
+
+// Wish object into the BAND sprite: hand-composite (byte-swap + key-skip +
+// bounds-clip), like blitFoodToBand — TFT_eSprite::pushImage transparency is broken.
+static void blitDreamToBand(TFT_eSprite& band, int cx, int cy) {
+  if (!s_dreamBuf) return;
+  uint16_t* dst = (uint16_t*)band.getPointer();
+  const int bw = band.width(), bh = band.height();
+  const uint16_t key = s_dreamBuf[0];
+  const int x0 = cx - DREAM_OBJ / 2, y0 = cy - DREAM_OBJ / 2;
+  for (int j = 0; j < DREAM_OBJ; j++) {
+    const int by = y0 + j;
+    if (by < 0 || by >= bh) continue;
+    for (int i = 0; i < DREAM_OBJ; i++) {
+      const int bx = x0 + i;
+      if (bx < 0 || bx >= bw) continue;
+      const uint16_t p = s_dreamBuf[j * DREAM_OBJ + i];
+      if (p != key) dst[by * bw + bx] = (uint16_t)((p << 8) | (p >> 8));
+    }
   }
 }
 
+// Wish object onto the PANEL: pushImage with the magenta key, clipped by whatever
+// viewport the caller set (the picker-icon pattern — pushImage on the panel is safe
+// and honours the viewport, unlike the frozen sprite overload).
+static void blitDreamToPanel(TFT_eSPI& c, int cx, int cy) {
+  if (!s_dreamBuf) return;
+  const bool sw = c.getSwapBytes();
+  c.setSwapBytes(true);
+  c.pushImage(cx - DREAM_OBJ / 2, cy - DREAM_OBJ / 2, DREAM_OBJ, DREAM_OBJ, s_dreamBuf, s_dreamBuf[0]);
+  c.setSwapBytes(sw);
+}
+
 void anim::composeDaydreamBand(TFT_eSprite& band, int icon) {
+  ensureDreamBuf(icon);              // decode-once cache; drives the whole bubble this frame
+  if (!s_dreamBuf) return;           // no art (yet) -> draw nothing, not an empty cloud
   const SpeciesAnchors& a = activeSpecies().anchors;
-  drawDreamShape(band, a.dreamCx - spriteX(), a.dreamCy - spriteY(), icon);
+  drawDreamCloud(band, a.dreamCx - spriteX(), a.dreamCy - spriteY());
+  blitDreamToBand(band, a.dreamCx - spriteX(), a.dreamCy - spriteY());
 }
 
 // The band only covers the pet footprint (y >= spriteY), so the bubble's top
@@ -204,20 +251,24 @@ void anim::composeDaydreamBand(TFT_eSprite& band, int icon) {
 static const int DREAM_TOP_Y = 24;   // just below the meter labels
 
 void anim::composeDaydreamDirect(TFT_eSPI& c, int icon) {
+  ensureDreamBuf(icon);              // cached (band ran it first); safe if the band was skipped
+  if (!s_dreamBuf) return;
   const SpeciesAnchors& a = activeSpecies().anchors;
   const int boxR = spriteX() + spriteW();
   c.setViewport(boxR, 0, 320 - boxR, horizonY(), false);            // right of the pet
-  drawDreamShape(c, a.dreamCx, a.dreamCy, icon);
+  drawDreamCloud(c, a.dreamCx, a.dreamCy);
+  blitDreamToPanel(c, a.dreamCx, a.dreamCy);
   c.resetViewport();
   c.setViewport(spriteX(), DREAM_TOP_Y, boxR - spriteX(), spriteY() - DREAM_TOP_Y, false);  // above the band
-  drawDreamShape(c, a.dreamCx, a.dreamCy, icon);
+  drawDreamCloud(c, a.dreamCx, a.dreamCy);
+  blitDreamToPanel(c, a.dreamCx, a.dreamCy);
   c.resetViewport();
 }
 
 void anim::eraseDaydreamDirect(TFT_eSPI& c) {          // erase both direct parts
   const SpeciesAnchors& a = activeSpecies().anchors;
   const int boxR = spriteX() + spriteW();
-  restoreBg(c, boxR, a.dreamCy - 16, 320 - boxR, 52);                          // right open-sky
+  restoreBg(c, boxR, a.dreamCy - 36, 320 - boxR, 96);                          // right open-sky
   restoreBg(c, spriteX(), DREAM_TOP_Y, boxR - spriteX(), spriteY() - DREAM_TOP_Y);  // above-band strip
 }
 

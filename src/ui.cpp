@@ -195,7 +195,8 @@ static void eraseCelestial(TFT_eSPI& tft, int cx, int cy) {
 
 // --- ambient critters (time-of-day aware) ---
 // Fireflies blink in the open sky at dusk/night; a butterfly wanders low across
-// the sky by day. All live OUTSIDE the giraffe box so the band never owns them.
+// the sky by day. Fireflies stay OUTSIDE the giraffe box; the butterfly splits
+// like the birds (out-of-box direct here, in-box via composeSkyBand).
 // Firefly render-state cap (positions come from the active biome; this bounds the
 // per-instance blink/erase state).
 static const int MAX_FF = 12;
@@ -204,7 +205,32 @@ static int  s_ffY[MAX_FF]     = {0};
 static bool s_ffShown[MAX_FF] = {false};
 static int  s_flutterX = -999, s_flutterY = 0;   // wandering daytime butterfly
 
-static bool flutterInBox(int x) { return x + 8 > boxL() && x - 8 < boxR(); }
+// Direct (panel) butterfly draw, viewport-clipped to OUTSIDE the pet box so the
+// in-box portion is left to the band sprite (composeSkyBand). ~28px wide, so it
+// straddles at most one box edge; vpDatum=false → absolute coords.
+static void drawButterflyDirect(TFT_eSPI& tft, int x, int y, bool flap) {
+  const int l = x - 14, r = x + 14;
+  if (r <= boxL() || l >= boxR()) { drawButterfly(tft, x, y, flap); return; }  // fully outside
+  if (l < boxL()) {                                                            // straddles left edge
+    tft.setViewport(0, 0, boxL(), horizonY(), false);
+    drawButterfly(tft, x, y, flap);
+    tft.resetViewport();
+  } else if (r > boxR()) {                                                     // straddles right edge
+    tft.setViewport(boxR(), 0, 320 - boxR(), horizonY(), false);
+    drawButterfly(tft, x, y, flap);
+    tft.resetViewport();
+  }
+  // else fully inside the box → the band sprite owns it
+}
+
+// Erase the parts of an old butterfly that lie OUTSIDE the pet box (the in-box
+// part is owned by the band sprite, which recomposites it every frame).
+static void eraseButterfly(TFT_eSPI& tft, int x, int y) {
+  const int l0 = x - 15, l1 = min(x + 16, boxL());
+  if (l1 > l0) restoreBg(tft, l0, y - 9, l1 - l0, 20);
+  const int r0 = max(x - 15, boxR()), r1 = x + 16;
+  if (r1 > r0) restoreBg(tft, r0, y - 9, r1 - r0, 20);
+}
 
 static void animateCritters(TFT_eSPI& tft) {
   const bool night = (s_phaseId == PHASE_DUSK || s_phaseId == PHASE_NIGHT);
@@ -224,20 +250,19 @@ static void animateCritters(TFT_eSPI& tft) {
     }
   }
 
-  // Daytime butterfly: drifts across; hidden where it crosses the giraffe (like
-  // the birds). Erase its old open-sky box, draw at the new spot when outside.
+  // Daytime butterfly: drifts across; ducks BEHIND the pet where it crosses the
+  // box (like the birds) — out-of-box portion direct here, in-box portion in the
+  // band (composeSkyBand). Erase old outside-box slivers; draw the new spot.
   if (day) {
     const int nx = (int)((s_phase / 45) % 360) - 20;
     const int ny = 130 + (int)(8.0f * sinf(s_phase / 260.0f));
     if (nx != s_flutterX || ny != s_flutterY) {
-      // erase box must cover the full wingspan (x +/-14) or the wing tips trail
-      if (s_flutterX > -900 && !flutterInBox(s_flutterX))
-        restoreBg(tft, s_flutterX - 15, s_flutterY - 9, 31, 20);
-      if (!flutterInBox(nx)) drawButterfly(tft, nx, ny, (s_phase / 120) & 1);
+      if (s_flutterX > -900) eraseButterfly(tft, s_flutterX, s_flutterY);
+      drawButterflyDirect(tft, nx, ny, (s_phase / 120) & 1);
       s_flutterX = nx; s_flutterY = ny;
     }
   } else if (s_flutterX > -900) {                 // leaving day → clean up
-    if (!flutterInBox(s_flutterX)) restoreBg(tft, s_flutterX - 15, s_flutterY - 9, 31, 20);
+    eraseButterfly(tft, s_flutterX, s_flutterY);
     s_flutterX = -999;
   }
 }
@@ -249,7 +274,10 @@ void animateScenery(TFT_eSPI& tft) {
   const Biome* bio = biome();
   if (bio) for (int i = 0; i < bio->grassN; i++) {
     const Blade& b = bio->grass[i];
-    tft.fillRect(b.x - (b.amp + 3), b.y - b.h - 1, 2 * (b.amp + 3), b.h + 2, GROUND_COLOR);
+    // Erase via restoreBg (never a flat fill): it splits at the horizon so a
+    // blade poking into the sky doesn't smear ground color there, and repaints
+    // any tree/poop/grass the blade's box overlaps instead of stamping over them.
+    restoreBg(tft, b.x - (b.amp + 3), b.y - b.h - 1, 2 * (b.amp + 3), b.h + 2);
     drawBlade(tft, b);
   }
   // Clouds drift slowly; erase old + draw new, both clipped to outside the box.
@@ -312,6 +340,12 @@ void composeSkyBand(TFT_eSprite& band, uint16_t* gbuf) {
     drawCloud(band, s_cloudX[i] - spriteX(), CLOUD_Y[i] - spriteY());
   for (int i = 0; i < 3; i++)
     drawBird(band, s_birdX[i] - spriteX(), BIRD_Y[i] - spriteY(), s_birdUp[i]);
+  // Daytime butterfly's in-box portion (band auto-clips to its bounds); the
+  // giraffe overlay below occludes whatever the silhouette covers, so it ducks
+  // behind the pet instead of vanishing at the box edge. Its out-of-box portion
+  // is drawn directly in animateCritters (drawButterflyDirect).
+  if (s_flutterX > -900)
+    drawButterfly(band, s_flutterX - spriteX(), s_flutterY - spriteY(), (s_phase / 120) & 1);
   // Sun/moon behind the giraffe (band auto-clips to its bounds); the giraffe
   // overlay below then occludes whatever the silhouette covers.
   drawCelestialAt(band, s_celX - spriteX(), s_celY - spriteY());
@@ -325,6 +359,14 @@ void composeSkyBand(TFT_eSprite& band, uint16_t* gbuf) {
   }
 }
 
+// Poop sits at fixed ground spots; caching the count lets drawProps re-composite
+// the coils under anything erased over them (swaying grass, passing birds), so an
+// erase can't bite ground-color holes out of them. drawPoops owns the count.
+static const int POOP_X[Pet::MAX_POOP] = {48, 48, 264, 264};
+static const int POOP_Y[Pet::MAX_POOP] = {162, 186, 162, 186};
+static uint8_t   s_poopCount = 0;
+static void drawPoop(TFT_eSPI& tft, int x, int y);   // defined below
+
 // Redraw scene props whose bounding box intersects the given rect.
 static void drawProps(TFT_eSPI& tft, int x, int y, int w, int h) {
   // The sun/moon is NOT drawn here — it moves every frame and is painted by the
@@ -337,6 +379,9 @@ static void drawProps(TFT_eSPI& tft, int x, int y, int w, int h) {
     const TreePos& t = bio->trees[i];
     if (overlap(x, y, w, h, t.x - 25, t.baseY - 62, 50, 62)) bio->treeDraw(tft, t.x, t.baseY);
   }
+  // Poop behind the grass (drawn before the blades so grass stays in front).
+  for (int i = 0; i < s_poopCount; i++)
+    if (overlap(x, y, w, h, POOP_X[i] - 13, POOP_Y[i] - 15, 26, 22)) drawPoop(tft, POOP_X[i], POOP_Y[i]);
   for (int i = 0; i < bio->grassN; i++) {
     const Blade& b = bio->grass[i];
     if (overlap(x, y, w, h, b.x - (b.amp + 3), b.y - b.h - 1, 2 * (b.amp + 3), b.h + 2))
@@ -606,11 +651,10 @@ static void drawPoop(TFT_eSPI& tft, int x, int y) {
 }
 
 void drawPoops(TFT_eSPI& tft, uint8_t count) {
-  static const int px[Pet::MAX_POOP] = {48, 48, 264, 264};
-  static const int py[Pet::MAX_POOP] = {162, 186, 162, 186};
+  s_poopCount = count;                           // set first so restoreBg below won't repaint cleared slots
   for (int i = 0; i < Pet::MAX_POOP; i++) {
-    if (i < count) drawPoop(tft, px[i], py[i]);
-    else           restoreBg(tft, px[i] - 13, py[i] - 15, 26, 22);
+    if (i < count) drawPoop(tft, POOP_X[i], POOP_Y[i]);
+    else           restoreBg(tft, POOP_X[i] - 13, POOP_Y[i] - 15, 26, 22);
   }
 }
 

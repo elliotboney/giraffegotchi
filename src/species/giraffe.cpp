@@ -73,4 +73,5 @@ extern const Species GIRAFFE = {   // `extern` for external linkage (const is in
   /* biome   */ &SAVANNA,
   /* food    */ nullptr,
   /* icon    */ "icon",
+  /* dreams  */ 3,   // objects/dream1..3.png (art pending)
 };

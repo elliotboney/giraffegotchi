@@ -100,4 +100,5 @@ struct Species {
   const Biome*    biome;    // Epic 3
   const FoodItem* food;     // Epic 2/5 (null => drawn apple)
   const char*     icon;     // Epic 4: picker icon sprite name (null => scaled happy)
+  uint8_t         dreamN;   // daydream wish-objects in <folder>/objects/ (dream1..dreamN.png; 0 => no daydreams)
 };

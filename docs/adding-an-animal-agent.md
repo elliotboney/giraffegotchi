@@ -53,7 +53,8 @@ ChatGPT, save the 19 poses into `img/<name>/` (props/food under `img/<name>/obje
 
 Required pose names (the descriptor references these strings):
 `happy happy2 happy3 hungry sad excited sleepy sick reading thirsty bored dirty dead blink
-ears_up ears_down tail_left` + signature-move poses (`kick`, `kick2`, …) + `icon` + optional `food`.
+ears_up ears_down tail_left` + signature-move poses (`kick1`, `kick2`) + `icon` + optional `food`
++ optional daydream objects (`objects/dream1`, `dream2`, … — 64×64, one per `dreamN`).
 
 A single-frame pose (e.g. only `blink.png`, no `blink2/3`) is fine — the engine is
 variable-length. Never hardcode "3 frames".
@@ -93,6 +94,7 @@ Copy `groundhog.cpp` (has food, no caps) or `giraffe.cpp` (has caps + tree hook)
 | `biome` | `&<X>_BIOME` — REQUIRED, see below | build a real world, don't borrow one |
 | `food` | `&<X>_FOOD` — REQUIRED, see below | define one even if the sprite art lands later |
 | `icon` | picker tile sprite name | `"icon"` (null → scaled `happy`) |
+| `dreamN` | count of daydream wish-objects (optional) | `0` = no daydreams, or N → loads `data/<name>/dream1..N.png` (source in `img/<name>/objects/`, flattened by prep). Safe to ship `0` or set N before the art exists |
 
 ### Food (required)
 
@@ -104,6 +106,20 @@ Pick a thematic food (flamingo → shrimp; that's why they're pink). It decodes 
 `data/<name>/food.png`. **If that sprite isn't on the FS yet, the eat animation safely draws
 nothing** — `renderPoseToBuffer` fails, the buffer is freed, `blitFoodToBand` no-ops. No crash.
 So you can commit the descriptor before the art exists; just flag the gap.
+
+### Daydream objects (optional)
+
+```cpp
+/* dreams */ 3,   // -> objects/dream1.png, dream2.png, dream3.png
+```
+
+While idle + content, the pet floats a thought bubble that cycles through `dreamN` wish-objects —
+one per thing the animal daydreams about (a treat, a toy, a heart). Source PNGs go in
+`img/<name>/objects/dream1.png` … `dreamN.png`; `prep` sizes them to a **64×64 square** and
+flattens them to `data/<name>/dream1.png` … `dreamN.png` (no `objects/` subfolder on the FS —
+same as `food`). Set `dreamN = 0` to opt out entirely (no bubble). **Missing PNGs safely no-op** —
+decode fails → buffer freed → nothing drawn (not an empty cloud), so you can set `dreamN` before the
+art lands, same as food. `prep`'s `DREAM_PX` and the engine's `DREAM_OBJ` must stay in lockstep.
 
 ### Biome (required)
 
