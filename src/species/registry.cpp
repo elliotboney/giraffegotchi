@@ -8,14 +8,11 @@ extern const Species GROUNDHOG;
 static const Species* const SPECIES[] = { &GIRAFFE, &GROUNDHOG };
 static const int SPECIES_N = sizeof(SPECIES) / sizeof(SPECIES[0]);
 
-// Dev-only compile-time active-species override (Story 2.6) — the runtime swap
-// (Epic 4) changes s_active after boot. Defaults to the giraffe. Pick another by
-// naming its symbol, e.g. -DACTIVE_SPECIES=GROUNDHOG.
-#ifndef ACTIVE_SPECIES
-#define ACTIVE_SPECIES GIRAFFE
-#endif
-
-static const Species* s_active = &ACTIVE_SPECIES;
+// Default species on a fresh device (no valid save). The on-device picker + NVS
+// persistence (Epic 4) choose the active species thereafter; boot restores the
+// saved one. (The Story 2.6 dev compile-time override is retired now that the
+// real selector ships — the groundhog is reached only through it.)
+static const Species* s_active = &GIRAFFE;
 
 const Species& activeSpecies() { return *s_active; }
 int  speciesCount()            { return SPECIES_N; }
