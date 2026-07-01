@@ -26,8 +26,11 @@ import os
 import sys
 from PIL import Image, ImageChops, ImageDraw
 
-W, H = 150, 160            # firmware body display rect
-FIT_W, FIT_H = 144, 153    # content box inside the rect (leaves a margin)
+W, H = 150, 160            # default body display rect
+BODY_SIZES = {             # per-species body rect (W, H) — must match descriptor geom
+    "groundhog": (150, 150),   # squat/square, distinct from the giraffe (NFR3)
+}
+BODY_MARGIN = 3            # content margin per side inside the body rect (~ old 144x153 fit)
 PX = 2                     # screen pixels per sprite pixel (chunkiness)
 ALPHA_THRESH = 128         # source alpha >= this counts as foreground (1-bit key)
 BG_TOL = 44                # opaque-art fallback: diff vs bg that counts as fg
@@ -147,6 +150,7 @@ def species_sources(img_dir):
 def prep_species(name, body_dir, objects_dir, out_root):
     out_dir = os.path.join(out_root, name)
     os.makedirs(out_dir, exist_ok=True)
+    bw, bh = BODY_SIZES.get(name, (W, H))
     n = 0
     for f in sorted(os.listdir(body_dir)):
         if not f.endswith(".png"):
@@ -156,7 +160,7 @@ def prep_species(name, body_dir, objects_dir, out_root):
         if pose == "icon":
             prep(os.path.join(body_dir, f), dst, ICON_PX, ICON_PX, margin=2)
         else:
-            prep(os.path.join(body_dir, f), dst, W, H)
+            prep(os.path.join(body_dir, f), dst, bw, bh, margin=BODY_MARGIN)
         n += 1
     if os.path.isdir(objects_dir):
         for f in sorted(os.listdir(objects_dir)):
